@@ -80,7 +80,12 @@ def maybe_rewrite_blocked_url(url: str) -> str:
     engine (with google blocked fallback handled by get_search_url) using the 'q' param.
     Otherwise return unchanged.
     """
-    if not _block_google_enabled():
+    # Enforce selected engine by rewriting Google URLs when:
+    #  - blocking is enabled, OR
+    #  - selected engine is not Google
+    # Only skip rewrite when engine is Google AND blocking is disabled.
+    engine = get_search_engine()
+    if not _block_google_enabled() and engine == "google":
         return url
 
     try:
@@ -88,8 +93,8 @@ def maybe_rewrite_blocked_url(url: str) -> str:
         host = (parsed.netloc or "").lower()
         path = (parsed.path or "").lower()
 
-        # Only consider google.* domains for search paths
-        if "google." in host and path in ("/search", "/url"):
+        # Consider any google.* URL
+        if "google." in host:
             qs = parse_qs(parsed.query or "")
             q_vals = qs.get("q") or []
             if q_vals:
@@ -98,6 +103,23 @@ def maybe_rewrite_blocked_url(url: str) -> str:
                 if rewritten != url:
                     logger.warning(f"Blocking Google URL; rewriting to: {rewritten}")
                 return rewritten
+            # No query param present; send to engine homepage
+            if engine == "google":
+                # If engine is google but blocking is enabled, fallback handled by get_search_url on query.
+                # For homepage redirect, prefer ddg homepage.
+                homepage = "https://duckduckgo.com/"
+            elif engine == "bing":
+                homepage = "https://www.bing.com/"
+            elif engine == "ddg":
+                homepage = "https://duckduckgo.com/"
+            elif engine == "brave":
+                homepage = "https://search.brave.com/"
+            else:  # custom
+                # Best effort: leave unchanged if custom; without a query we can't build a template URL
+                homepage = None
+            if homepage:
+                logger.warning(f"Blocking Google URL; redirecting to engine homepage: {homepage}")
+                return homepage
     except Exception as e:
         logger.debug(f"maybe_rewrite_blocked_url: failed to parse or rewrite URL '{url}': {e}")
 

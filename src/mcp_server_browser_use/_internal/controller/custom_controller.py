@@ -125,29 +125,48 @@ class CustomController(Controller):
             for action_name, params in action.model_dump(exclude_unset=True).items():
                 if params is not None:
                     # -- Search engine selection and URL rewrite hooks --
-                    # Normalize params to dict for safe mutation
-                    if isinstance(params, dict):
-                        # Handle search_google by converting to an engine-aware go_to_url
-                        if action_name == "search_google":
-                            query = params.get("query") or params.get("q")
-                            if not query:
-                                logger.warning("search_google called without 'query'. Passing through.")
+                    # Support both dict params and Pydantic BaseModel params
+                    try:
+                        from pydantic import BaseModel as _PydanticBaseModel
+                    except Exception:
+                        _PydanticBaseModel = tuple()  # type: ignore
+
+                    def _get_attr(p, key, default=None):
+                        if isinstance(p, dict):
+                            return p.get(key, default)
+                        return getattr(p, key, default)
+
+                    def _set_attr(p, key, value):
+                        if isinstance(p, dict):
+                            p[key] = value
+                            return p
+                        setattr(p, key, value)
+                        return p
+
+                    # Handle search_google by converting to an engine-aware go_to_url
+                    if action_name == "search_google":
+                        query = _get_attr(params, "query") or _get_attr(params, "q")
+                        if not query:
+                            logger.warning("search_google called without 'query'. Passing through.")
+                        else:
+                            engine = get_search_engine()
+                            url = get_search_url(query)
+                            logger.info(f"search_google -> engine='{engine}', navigating to: {url}")
+                            new_tab = bool(_get_attr(params, "new_tab", False))
+                            action_name = "go_to_url"
+                            if isinstance(params, _PydanticBaseModel):
+                                params = GoToUrlAction(url=url, new_tab=new_tab)
                             else:
-                                engine = get_search_engine()
-                                url = get_search_url(query)
-                                logger.info(f"search_google -> engine='{engine}', navigating to: {url}")
-                                # Convert to go_to_url while preserving possible new_tab flag
-                                new_tab = params.get("new_tab", False)
-                                action_name = "go_to_url"
                                 params = {"url": url, "new_tab": new_tab}
 
-                        # For navigations, optionally rewrite blocked Google URLs
-                        if action_name in ("go_to_url", "open_tab", "open_new_tab") and "url" in params:
-                            original_url = params.get("url")
-                            rewritten = maybe_rewrite_blocked_url(original_url)
-                            if rewritten != original_url:
-                                logger.info(f"Rewriting blocked URL: {original_url} -> {rewritten}")
-                            params["url"] = rewritten
+                    # For navigations, rewrite Google URLs to the selected engine as needed
+                    if action_name in ("go_to_url", "open_tab", "open_new_tab"):
+                        current_url = _get_attr(params, "url")
+                        if current_url:
+                            rewritten = maybe_rewrite_blocked_url(current_url)
+                            if rewritten != current_url:
+                                logger.info(f"Rewriting blocked URL: {current_url} -> {rewritten}")
+                                params = _set_attr(params, "url", rewritten)
 
                     if action_name.startswith("mcp"):
                         # this is a mcp tool
