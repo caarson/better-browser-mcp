@@ -269,7 +269,7 @@ Configure the server and CLI using environment variables. You can set these in y
 |                                     | `MCP_SERVER_MCP_CONFIG`                        | Optional: JSON string for MCP client config used by the internal controller.                               | `null`                            |
 
 | **Search (MCP_*)**                  |                                                | Web search engine configuration for the built-in "search_google" action.                                   |                                   |
-|                                     | `MCP_SEARCH_ENGINE`                            | Which search engine to use when the agent triggers a search. Options: `ddg`, `bing`, `google`.             | `ddg`                             |
+|                                     | `MCP_SEARCH_ENGINE`                            | Which search engine to use when the agent triggers a search. Options: `ddg`, `bing`, `google`, `custom`.   | `bing`                            |
 |                                     | `MCP_BLOCK_GOOGLE`                             | If `true` and the engine is `google`, the search will automatically fall back to DuckDuckGo. Also rewrites Google search URLs before navigation. | `false`                           |
 
 **Supported LLM Providers (`MCP_LLM_PROVIDER`):**
@@ -282,8 +282,8 @@ Configure the server and CLI using environment variables. You can set these in y
 Set these to control the built-in search action behavior:
 
 ```dotenv
-# Default engine is DuckDuckGo
-MCP_SEARCH_ENGINE=ddg  # options: ddg | bing | google
+# Default engine is Bing
+MCP_SEARCH_ENGINE=bing  # options: ddg | bing | google | custom
 
 # Optionally block Google; if true and engine=google, auto-fallback to ddg
 MCP_BLOCK_GOOGLE=false
@@ -291,6 +291,16 @@ MCP_BLOCK_GOOGLE=false
 # Example forcing Bing and blocking Google redirects
 # MCP_SEARCH_ENGINE=bing
 # MCP_BLOCK_GOOGLE=true
+
+# Use a custom engine (two options):
+# A) Provide a URL template that includes {q}
+# MCP_SEARCH_ENGINE=custom
+# MCP_SEARCH_URL_TEMPLATE=https://kagi.com/search?q={q}
+
+# B) Provide a base URL and the query param name
+# MCP_SEARCH_ENGINE=custom
+# MCP_SEARCH_ENGINE_URL=https://search.brave.com/search
+# MCP_SEARCH_QUERY_PARAM=q
 ```
 
 ## Connecting to Your Own Browser (CDP)
