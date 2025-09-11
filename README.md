@@ -269,7 +269,7 @@ Configure the server and CLI using environment variables. You can set these in y
 |                                     | `MCP_SERVER_MCP_CONFIG`                        | Optional: JSON string for MCP client config used by the internal controller.                               | `null`                            |
 
 | **Search (MCP_*)**                  |                                                | Web search engine configuration for the built-in "search_google" action.                                   |                                   |
-|                                     | `MCP_SEARCH_ENGINE`                            | Which search engine to use when the agent triggers a search. Options: `ddg`, `bing`, `google`, `custom`.   | `bing`                            |
+|                                     | `MCP_SEARCH_ENGINE`                            | Which search engine to use when the agent triggers a search. Options: `bing`, `ddg`, `google`, `brave`, `custom`. | `bing`                            |
 |                                     | `MCP_BLOCK_GOOGLE`                             | If `true` and the engine is `google`, the search will automatically fall back to DuckDuckGo. Also rewrites Google search URLs before navigation. | `false`                           |
 
 **Supported LLM Providers (`MCP_LLM_PROVIDER`):**
@@ -283,7 +283,7 @@ Set these to control the built-in search action behavior:
 
 ```dotenv
 # Default engine is Bing
-MCP_SEARCH_ENGINE=bing  # options: ddg | bing | google | custom
+MCP_SEARCH_ENGINE=bing  # options: bing | ddg | google | brave | custom
 
 # Optionally block Google; if true and engine=google, auto-fallback to ddg
 MCP_BLOCK_GOOGLE=false
@@ -291,6 +291,9 @@ MCP_BLOCK_GOOGLE=false
 # Example forcing Bing and blocking Google redirects
 # MCP_SEARCH_ENGINE=bing
 # MCP_BLOCK_GOOGLE=true
+
+# Example using Brave Search (built-in)
+# MCP_SEARCH_ENGINE=brave
 
 # Use a custom engine (two options):
 # A) Provide a URL template that includes {q}

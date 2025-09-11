@@ -5,7 +5,7 @@ from urllib.parse import urlparse, parse_qs, urlencode
 
 logger = logging.getLogger(__name__)
 
-SearchEngine = Literal["google", "ddg", "bing", "custom"]
+SearchEngine = Literal["google", "ddg", "bing", "brave", "custom"]
 
 
 def _block_google_enabled() -> bool:
@@ -15,7 +15,7 @@ def _block_google_enabled() -> bool:
 def get_search_engine() -> SearchEngine:
     raw = os.environ.get("MCP_SEARCH_ENGINE", "bing")
     engine = (raw or "bing").strip().lower()
-    if engine not in ("google", "ddg", "bing", "custom"):
+    if engine not in ("google", "ddg", "bing", "brave", "custom"):
         logger.warning(f"Invalid MCP_SEARCH_ENGINE='{raw}', defaulting to 'bing'.")
         engine = "bing"
     # If block is enabled and engine is google, we'll still return 'google' here,
@@ -41,6 +41,8 @@ def get_search_url(query: str) -> str:
         base = "https://www.bing.com/search?q="
     elif effective_engine == "ddg":
         base = "https://duckduckgo.com/?q="
+    elif effective_engine == "brave":
+        base = "https://search.brave.com/search?q="
     else:  # custom
         # Option A: Template that includes {q}
         template = os.environ.get("MCP_SEARCH_URL_TEMPLATE")
