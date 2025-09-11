@@ -6,6 +6,7 @@ import traceback
 import uuid
 from typing import Any, Dict, Optional
 from pathlib import Path
+import sys
 
 
 from .config import settings # Import global AppSettings instance
@@ -352,6 +353,11 @@ def main():
     logger.info(f"Browser keep_open: {settings.browser.keep_open}, Use own browser: {settings.browser.use_own_browser}")
     if settings.browser.use_own_browser:
         logger.info(f"Connecting to own browser via CDP: {settings.browser.cdp_url}")
+    # Print a brief startup notice to stderr for interactive runs
+    try:
+        print("mcp-server-browser-use: running (waiting for MCP client on stdio)...", file=sys.stderr, flush=True)
+    except Exception:
+        pass
     server_instance.run()
 
 if __name__ == "__main__":
