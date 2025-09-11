@@ -28,6 +28,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from browser_use.agent.views import ActionModel, ActionResult
 
 from ..utils.mcp_client import create_tool_param_model, setup_mcp_client_and_tools
+from ..utils.search_engine import get_search_url, maybe_rewrite_blocked_url, get_search_engine
 
 from browser_use.utils import time_execution_sync
 
@@ -123,6 +124,31 @@ class CustomController(Controller):
         try:
             for action_name, params in action.model_dump(exclude_unset=True).items():
                 if params is not None:
+                    # -- Search engine selection and URL rewrite hooks --
+                    # Normalize params to dict for safe mutation
+                    if isinstance(params, dict):
+                        # Handle search_google by converting to an engine-aware go_to_url
+                        if action_name == "search_google":
+                            query = params.get("query") or params.get("q")
+                            if not query:
+                                logger.warning("search_google called without 'query'. Passing through.")
+                            else:
+                                engine = get_search_engine()
+                                url = get_search_url(query)
+                                logger.info(f"search_google -> engine='{engine}', navigating to: {url}")
+                                # Convert to go_to_url while preserving possible new_tab flag
+                                new_tab = params.get("new_tab", False)
+                                action_name = "go_to_url"
+                                params = {"url": url, "new_tab": new_tab}
+
+                        # For navigations, optionally rewrite blocked Google URLs
+                        if action_name in ("go_to_url", "open_tab", "open_new_tab") and "url" in params:
+                            original_url = params.get("url")
+                            rewritten = maybe_rewrite_blocked_url(original_url)
+                            if rewritten != original_url:
+                                logger.info(f"Rewriting blocked URL: {original_url} -> {rewritten}")
+                            params["url"] = rewritten
+
                     if action_name.startswith("mcp"):
                         # this is a mcp tool
                         logger.debug(f"Invoke MCP tool: {action_name}")

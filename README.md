@@ -32,14 +32,17 @@ AI-driven browser automation server implementing the Model Context Protocol (MCP
 `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
 2. Get Playwright browsers (required for automation):
-`uvx --from mcp-server-browser-use@latest python -m playwright install`
+   - PyPI release:
+     `uvx --from mcp-server-browser-use@latest python -m playwright install`
+   - GitHub fork (until PR is merged):
+     `uvx --from git+https://github.com/caarson/mcp-browser-use python -m playwright install`
 
 ### Integration Patterns
 
-For MCP clients like Claude Desktop, add a server configuration that's as simple as:
+For MCP clients like Claude Desktop, add a server configuration. Use either the PyPI release or the GitHub fork (until PR is merged):
 
 ```json
-// Example 1: One-Line Latest Version (Always Fresh)
+// Example 1A: One-Line Latest Version (PyPI)
 "mcpServers": {
     "browser-use": {
       "command": "uvx",
@@ -51,6 +54,22 @@ For MCP clients like Claude Desktop, add a server configuration that's as simple
         "MCP_BROWSER_HEADLESS": "true",
       }
     }
+}
+```
+
+```json
+// Example 1B: Use GitHub fork (until PR is merged)
+"mcpServers": {
+  "browser-use": {
+    "command": "uvx",
+    "args": ["--from", "git+https://github.com/caarson/mcp-browser-use", "mcp-server-browser-use"],
+    "env": {
+      "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY_HERE_IF_USING_GOOGLE",
+      "MCP_LLM_PROVIDER": "google",
+      "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
+      "MCP_BROWSER_HEADLESS": "true"
+    }
+  }
 }
 ```
 
@@ -118,7 +137,7 @@ For MCP clients like Claude Desktop, add a server configuration that's as simple
 ```
 
 ```json
-// Example 4: Local Development Flow
+// Example 4: Local Development Flow (clone and run locally)
 "mcpServers": {
     "browser-use": {
       "command": "uv",
@@ -175,7 +194,7 @@ This package also provides a command-line interface `mcp-browser-cli` for direct
         *   `TASK` (string, required): The primary task for the agent.
     *   **Example:**
         ```bash
-        mcp-browser-cli run-browser-agent "Go to example.com and find the title." -e .env
+  mcp-browser-cli run-browser-agent "Go to example.com and find the title." -e .env
         ```
 
 2.  **`mcp-browser-cli run-deep-research [OPTIONS] RESEARCH_TASK`**
@@ -186,7 +205,7 @@ This package also provides a command-line interface `mcp-browser-cli` for direct
         *   `--max-parallel-browsers INTEGER, -p INTEGER`: Override `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`.
     *   **Example:**
         ```bash
-        mcp-browser-cli run-deep-research "What are the latest advancements in AI-driven browser automation?" --max-parallel-browsers 5 -e .env
+  mcp-browser-cli run-deep-research "What are the latest advancements in AI-driven browser automation?" --max-parallel-browsers 5 -e .env
         ```
 
 All other configurations (LLM keys, paths, browser settings) are picked up from environment variables (or the specified `.env` file) as detailed in the Configuration section.
@@ -246,10 +265,30 @@ Configure the server and CLI using environment variables. You can set these in y
 |                                     | `MCP_SERVER_ANONYMIZED_TELEMETRY`              | Enable/disable anonymized telemetry (`true`/`false`).                                                      | `true`                            |
 |                                     | `MCP_SERVER_MCP_CONFIG`                        | Optional: JSON string for MCP client config used by the internal controller.                               | `null`                            |
 
+| **Search (MCP_*)**                  |                                                | Web search engine configuration for the built-in "search_google" action.                                   |                                   |
+|                                     | `MCP_SEARCH_ENGINE`                            | Which search engine to use when the agent triggers a search. Options: `ddg`, `bing`, `google`.             | `ddg`                             |
+|                                     | `MCP_BLOCK_GOOGLE`                             | If `true` and the engine is `google`, the search will automatically fall back to DuckDuckGo. Also rewrites Google search URLs before navigation. | `false`                           |
+
 **Supported LLM Providers (`MCP_LLM_PROVIDER`):**
 `openai`, `azure_openai`, `anthropic`, `google`, `mistral`, `ollama`, `deepseek`, `openrouter`, `alibaba`, `moonshot`, `unbound`
 
 *(Refer to `.env.example` for a comprehensive list of all supported environment variables and their specific provider keys/endpoints.)*
+
+### Search engine options
+
+Set these to control the built-in search action behavior:
+
+```dotenv
+# Default engine is DuckDuckGo
+MCP_SEARCH_ENGINE=ddg  # options: ddg | bing | google
+
+# Optionally block Google; if true and engine=google, auto-fallback to ddg
+MCP_BLOCK_GOOGLE=false
+
+# Example forcing Bing and blocking Google redirects
+# MCP_SEARCH_ENGINE=bing
+# MCP_BLOCK_GOOGLE=true
+```
 
 ## Connecting to Your Own Browser (CDP)
 
@@ -302,6 +341,9 @@ npx @modelcontextprotocol/inspector@latest \
 # Create a .env file with your settings (including MCP_RESEARCH_TOOL_SAVE_DIR) or use environment variables
 uv run mcp-browser-cli -e .env run-browser-agent "What is the title of example.com?"
 uv run mcp-browser-cli -e .env run-deep-research "What is the best material for a pan for everyday use on amateur kitchen and dishwasher?"
+
+# Alternatively, run from the GitHub fork without installing locally
+uvx --from git+https://github.com/caarson/mcp-browser-use mcp-server-browser-use
 ```
 
 ## Troubleshooting
