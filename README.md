@@ -3,6 +3,8 @@
 <br/>
 
 # browser-use MCP server & CLI
+
+> Note: This repository is a fork of [Saik0s/mcp-browser-use](https://github.com/Saik0s/mcp-browser-use). The fork lives at [caarson/mcp-browser-use](https://github.com/caarson/mcp-browser-use) temporarily while a PR is pending upstream. Until the PR is merged, please install and run from this fork. Instructions below reflect this.
 [![Documentation](https://img.shields.io/badge/Documentation-📕-blue)](https://docs.browser-use.com)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
@@ -32,17 +34,33 @@ AI-driven browser automation server implementing the Model Context Protocol (MCP
 `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
 2. Get Playwright browsers (required for automation):
-   - PyPI release:
-     `uvx --from mcp-server-browser-use@latest python -m playwright install`
-   - GitHub fork (until PR is merged):
+   - Preferred (GitHub fork while PR is pending):
      `uvx --from git+https://github.com/caarson/mcp-browser-use python -m playwright install`
+   - Alternative (PyPI release):
+     `uvx --from mcp-server-browser-use@latest python -m playwright install`
 
 ### Integration Patterns
 
-For MCP clients like Claude Desktop, add a server configuration. Use either the PyPI release or the GitHub fork (until PR is merged):
+For MCP clients like Claude Desktop, add a server configuration. Prefer the GitHub fork until the PR is merged; a PyPI example is also included.
 
 ```json
-// Example 1A: One-Line Latest Version (PyPI)
+// Example 1A: Use GitHub fork (preferred while PR pending)
+"mcpServers": {
+  "browser-use": {
+    "command": "uvx",
+    "args": ["--from", "git+https://github.com/caarson/mcp-browser-use", "mcp-server-browser-use"],
+    "env": {
+      "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY_HERE_IF_USING_GOOGLE",
+      "MCP_LLM_PROVIDER": "google",
+      "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
+      "MCP_BROWSER_HEADLESS": "true"
+    }
+  }
+}
+```
+
+```json
+// Example 1B: One-Line Latest Version (PyPI)
 "mcpServers": {
     "browser-use": {
       "command": "uvx",
@@ -57,21 +75,6 @@ For MCP clients like Claude Desktop, add a server configuration. Use either the 
 }
 ```
 
-```json
-// Example 1B: Use GitHub fork (until PR is merged)
-"mcpServers": {
-  "browser-use": {
-    "command": "uvx",
-    "args": ["--from", "git+https://github.com/caarson/mcp-browser-use", "mcp-server-browser-use"],
-    "env": {
-      "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY_HERE_IF_USING_GOOGLE",
-      "MCP_LLM_PROVIDER": "google",
-      "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
-      "MCP_BROWSER_HEADLESS": "true"
-    }
-  }
-}
-```
 
 ```json
 // Example 2: Advanced Configuration with CDP
@@ -342,7 +345,7 @@ npx @modelcontextprotocol/inspector@latest \
 uv run mcp-browser-cli -e .env run-browser-agent "What is the title of example.com?"
 uv run mcp-browser-cli -e .env run-deep-research "What is the best material for a pan for everyday use on amateur kitchen and dishwasher?"
 
-# Alternatively, run from the GitHub fork without installing locally
+# Prefer running from the GitHub fork while PR is pending
 uvx --from git+https://github.com/caarson/mcp-browser-use mcp-server-browser-use
 ```
 
