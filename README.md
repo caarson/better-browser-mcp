@@ -14,7 +14,14 @@ This is an upgraded fork of the original project:
 - Original: https://github.com/Saik0s/mcp-browser-use
 - This fork: https://github.com/caarson/mcp-browser-use
 
-We aim to upstream these improvements. Until then, install from this fork (instructions below).
+1.  **`run_auto`**
+  *   **Description:** Auto-selects between `task`, `research`, and `deep_research` using the same heuristics as `run_research(mode="auto")`.
+  *   **Arguments:**
+    *   `topic_or_task` (string, required)
+    *   `max_parallel_browsers_override` (integer, optional)
+  *   **Returns:** (string) Final result or research report string.
+
+2.  **`run_research`**
 
 ## Why “Better”?
 
@@ -23,14 +30,14 @@ Everything you expect from the original—plus pragmatic upgrades:
 - Unified tool: `run_research` with modes `auto | task | research | deep_research` (auto chooses the lightest viable path).
 - Smarter resource use: favors single-window tasks; deep research defaults to 1 parallel browser (configurable).
 - Search engine control: default Bing; supports DuckDuckGo, Brave, Google, or a custom engine template.
-- Google blocking: optionally block/redirect all google.* search URLs; rewrite “search_google” actions to your chosen engine.
+3.  **`run_task`**
 - Better search UX: agents click “Search instead for …” across engines to avoid query autocorrections.
 - Task-ready prompts: “task” mode targets dashboards, settings, and forms (e.g., Cloudflare DNS) without heavy research.
 
 All changes are opt-in via env vars and preserve backward compatibility with existing tools.
 
 ## Quick Start
-
+4.  **`run_deep_research`**
 ### The Essentials
 
 1. Install UV - the rocket-powered Python installer:

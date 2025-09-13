@@ -481,6 +481,18 @@ def serve() -> FastMCP:
 
         return await run_browser_agent(ctx, f"{prefix}{text}")  # type: ignore
 
+    @server.tool()
+    async def run_auto(
+        ctx: Context,
+        topic_or_task: str,
+        max_parallel_browsers_override: Optional[int] = None,
+    ) -> str:
+        """
+        Auto-select between task, research, and deep_research based on heuristics.
+        This is equivalent to calling run_research(..., mode="auto").
+        """
+        return await run_research(ctx, topic_or_task, mode="auto", max_parallel_browsers_override=max_parallel_browsers_override)  # type: ignore
+
     return server
 
 server_instance = serve() # Renamed from 'server' to avoid conflict with 'settings.server'
