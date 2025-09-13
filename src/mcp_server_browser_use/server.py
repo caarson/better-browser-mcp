@@ -4,7 +4,7 @@ import logging
 import os
 import traceback
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 from pathlib import Path
 import sys
 
@@ -398,7 +398,7 @@ def serve() -> FastMCP:
     async def run_research(
         ctx: Context,
         topic_or_task: str,
-        mode: Optional[str] = None,
+        mode: Literal["auto", "task", "research", "deep_research"] = "auto",
         max_parallel_browsers_override: Optional[int] = None,
     ) -> str:
         """
@@ -411,7 +411,8 @@ def serve() -> FastMCP:
         Env override: MCP_RESEARCH_MODE=auto|task|research|deep_research
         """
         env_mode = os.getenv("MCP_RESEARCH_MODE", "auto").lower()
-        effective_mode = (mode or env_mode or "auto").lower()
+        # If caller explicitly picks a mode, honor it; if left at default 'auto', allow env to set default mode
+        effective_mode = env_mode if mode == "auto" and env_mode in {"auto", "task", "research", "deep_research"} else mode
         text = topic_or_task or ""
 
         logger.info(f"run_research received (mode={effective_mode}): {text[:120]}...")

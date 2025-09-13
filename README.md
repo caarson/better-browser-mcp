@@ -151,6 +151,7 @@ For MCP clients like Claude Desktop, add a server configuration. Prefer the GitH
       ],
       "env": {
         "MCP_LLM_OPENROUTER_API_KEY": "YOUR_KEY_HERE_IF_USING_OPENROUTER",
+      > Note: The standalone `run_browser_agent` MCP tool has been removed. Use `run_research` with `mode=auto` (default), `mode=task` (UI actions), or `mode=research` (lightweight reading/summarization). The heavy pipeline remains available as `run_deep_research`.
         "MCP_LLM_PROVIDER": "openrouter",
         "MCP_LLM_MODEL_NAME": "openai/gpt-4o-mini",
         "MCP_BROWSER_HEADLESS": "true",
