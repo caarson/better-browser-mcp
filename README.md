@@ -68,18 +68,14 @@ For MCP clients like Claude Desktop, add a server configuration. Prefer the GitH
     "browser-use": {
       "command": "uvx",
       "args": ["mcp-server-browser-use@latest"],
-      "env": {
-        "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY_HERE_IF_USING_GOOGLE",
-        "MCP_LLM_PROVIDER": "google",
-        "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
-        "MCP_BROWSER_HEADLESS": "true",
-      }
     }
 }
 ```
 
 
 ```json
+
+> Note: The standalone `run_browser_agent` MCP tool has been removed. Use `run_research` with `mode=task` (for UI actions) or `mode=research` (for lightweight reading/summarization). The heavy pipeline remains available as `run_deep_research`.
 // Example 2: Advanced Configuration with CDP
 "mcpServers": {
     "browser-use": {

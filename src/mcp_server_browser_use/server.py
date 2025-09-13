@@ -177,7 +177,7 @@ async def get_browser_and_context() -> tuple[CustomBrowser, CustomBrowserContext
 def serve() -> FastMCP:
     server = FastMCP("mcp_server_browser_use")
 
-    @server.tool()
+    # Internal helper used by run_research/run_task; no longer exposed as an MCP tool
     async def run_browser_agent(ctx: Context, task: str) -> str:
         logger.info(f"Received run_browser_agent task: {task[:100]}...")
         # Browsing rules: prefer lightweight completion and handle search engine auto-corrections
