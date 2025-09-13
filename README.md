@@ -1,30 +1,33 @@
-<img src="./assets/header.png" alt="Browser Use Web UI" width="full"/>
+<img src="./assets/header.png" alt="Better MCP Browser-Use" width="full"/>
 
 <br/>
 
-# browser-use MCP server & CLI
+# Better-MCP-Browser-Use
 
-> Note: This repository is a fork of [Saik0s/mcp-browser-use](https://github.com/Saik0s/mcp-browser-use). The fork lives at [caarson/mcp-browser-use](https://github.com/caarson/mcp-browser-use) temporarily while a PR is pending upstream. Until the PR is merged, please install and run from this fork. Instructions below reflect this.
 [![Documentation](https://img.shields.io/badge/Documentation-📕-blue)](https://docs.browser-use.com)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-> **Project Note**: This MCP server implementation builds upon the [browser-use/web-ui](https://github.com/browser-use/web-ui) foundation. Core browser automation logic and configuration patterns are adapted from the original project.
+AI-driven browser automation and web research server for the Model Context Protocol (MCP), with practical upgrades for search control, resource usage, and a simpler one-tool interface.
 
-AI-driven browser automation server implementing the Model Context Protocol (MCP) for natural language browser control and web research. Also provides CLI access to its core functionalities.
+This is an upgraded fork of the original project:
 
-<a href="https://glama.ai/mcp/servers/@Saik0s/mcp-browser-use"><img width="380" height="200" src="https://glama.ai/mcp/servers/@Saik0s/mcp-browser-use/badge" alt="Browser-Use MCP server" /></a>
+- Original: https://github.com/Saik0s/mcp-browser-use
+- This fork: https://github.com/caarson/mcp-browser-use
 
-## Features
+We aim to upstream these improvements. Until then, install from this fork (instructions below).
 
--   🧠 **MCP Integration** - Full protocol implementation for AI agent communication.
--   🌐 **Browser Automation** - Page navigation, form filling, element interaction via natural language (`run_browser_agent` tool).
--   👁️ **Visual Understanding** - Optional screenshot analysis for vision-capable LLMs.
--   🔄 **State Persistence** - Option to manage a server browser session across multiple MCP calls or connect to user's browser.
--   🔌 **Multi-LLM Support** - Integrates with OpenAI, Anthropic, Azure, DeepSeek, Google, Mistral, Ollama, OpenRouter, Alibaba, Moonshot, Unbound AI.
--   🔍 **Deep Research Tool** - Dedicated tool for multi-step web research and report generation (`run_deep_research` tool).
--   ⚙️ **Environment Variable Configuration** - Fully configurable via environment variables using a structured Pydantic model.
--   🔗 **CDP Connection** - Ability to connect to and control a user-launched Chrome/Chromium instance via Chrome DevTools Protocol.
--   ⌨️ **CLI Interface** - Access core agent functionalities (`run_browser_agent`, `run_deep_research`) directly from the command line for testing and scripting.
+## Why “Better”?
+
+Everything you expect from the original—plus pragmatic upgrades:
+
+- Unified tool: `run_research` with modes `auto | task | research | deep_research` (auto chooses the lightest viable path).
+- Smarter resource use: favors single-window tasks; deep research defaults to 1 parallel browser (configurable).
+- Search engine control: default Bing; supports DuckDuckGo, Brave, Google, or a custom engine template.
+- Google blocking: optionally block/redirect all google.* search URLs; rewrite “search_google” actions to your chosen engine.
+- Better search UX: agents click “Search instead for …” across engines to avoid query autocorrections.
+- Task-ready prompts: “task” mode targets dashboards, settings, and forms (e.g., Cloudflare DNS) without heavy research.
+
+All changes are opt-in via env vars and preserve backward compatibility with existing tools.
 
 ## Quick Start
 
@@ -160,7 +163,7 @@ For MCP clients like Claude Desktop, add a server configuration. Prefer the GitH
 }
 ```
 
-**Key Insight:** The best configurations emerge from starting simple (Example 1). The .env.example file contains all possible dials.
+**Tip:** Start simple (Example 1). Use `.env` to opt into specific features later.
 
 ## MCP Tools
 
@@ -168,13 +171,29 @@ This server exposes the following tools via the Model Context Protocol:
 
 ### Synchronous Tools (Wait for Completion)
 
-1.  **`run_browser_agent`**
+1.  **`run_research`**
+  *   **Description:** Unified entrypoint with modes to handle both browsing tasks and research.
+  *   **Arguments:**
+    *   `topic_or_task` (string, required): The prompt describing the task or research topic.
+    *   `mode` (string, optional): `auto` (default), `task`, `research`, or `deep_research`.
+    *   `max_parallel_browsers_override` (integer, optional): Only used when `deep_research` is selected.
+  *   **Returns:** (string) Final result or research report string.
+  *   **Env override:** `MCP_RESEARCH_MODE=auto|task|research|deep_research` (default: `auto`).
+
+2.  **`run_task`**
+  *   **Description:** Smart router that prefers the lightweight task flow and only escalates to deep research when needed. Controlled by `MCP_TASK_ROUTER_MODE`.
+  *   **Arguments:**
+    *   `task` (string, required): The primary task or objective.
+    *   `max_parallel_browsers_override` (integer, optional): Passed through if deep research is chosen.
+  *   **Returns:** (string) The final result or deep research report string.
+
+3.  **`run_browser_agent`**
     *   **Description:** Executes a browser automation task based on natural language instructions and waits for it to complete. Uses settings from `MCP_AGENT_TOOL_*`, `MCP_LLM_*`, and `MCP_BROWSER_*` environment variables.
     *   **Arguments:**
         *   `task` (string, required): The primary task or objective.
     *   **Returns:** (string) The final result extracted by the agent or an error message. Agent history (JSON, optional GIF) saved if `MCP_AGENT_TOOL_HISTORY_PATH` is set.
 
-2.  **`run_deep_research`**
+4.  **`run_deep_research`**
     *   **Description:** Performs in-depth web research on a topic, generates a report, and waits for completion. Uses settings from `MCP_RESEARCH_TOOL_*`, `MCP_LLM_*`, and `MCP_BROWSER_*` environment variables. If `MCP_RESEARCH_TOOL_SAVE_DIR` is set, outputs are saved to a subdirectory within it; otherwise, operates in memory-only mode.
     *   **Arguments:**
         *   `research_task` (string, required): The topic or question for the research.
@@ -212,6 +231,70 @@ This package also provides a command-line interface `mcp-browser-cli` for direct
         ```
 
 All other configurations (LLM keys, paths, browser settings) are picked up from environment variables (or the specified `.env` file) as detailed in the Configuration section.
+
+### Router behavior (run_task)
+
+`run_task` chooses between `run_browser_agent` (lightweight) and `run_deep_research` (heavy). It favors single-window direct completion for tasks like opening GitHub, documentation, or a single README. It escalates only when the prompt clearly indicates multi-source synthesis, investigation/troubleshooting, or when the agent hits blockers.
+
+Control routing with:
+
+```dotenv
+# Router mode: auto | always-task | always-research
+MCP_TASK_ROUTER_MODE=auto
+```
+
+In auto mode, the router uses simple heuristics (keywords for simple navigation vs. complex analysis) and prompt length to decide.
+
+### Unified behavior (run_research)
+
+`run_research` adds an explicit `mode` control:
+
+- `auto` (default): decide between `task`, `research`, and `deep_research`.
+- `task`: treat as a concrete UI workflow (e.g., Cloudflare DNS, dashboards, consoles). Uses a single-window bias and acts directly.
+- `research`: lightweight reading/summarization using the browser agent with source links; avoids logins/settings changes.
+- `deep_research`: invokes the heavier multi-source pipeline.
+
+Env override for default: `MCP_RESEARCH_MODE=auto|task|research|deep_research`.
+
+## Configuration (Environment Variables)
+
+You can configure everything via env vars or a `.env` file. Highlights of the most relevant settings:
+
+- LLM: `MCP_LLM_PROVIDER`, `MCP_LLM_MODEL_NAME`, provider-specific API keys.
+- Browser: `MCP_BROWSER_HEADLESS`, `MCP_BROWSER_USE_OWN_BROWSER`, `MCP_BROWSER_CDP_URL`, `MCP_BROWSER_KEEP_OPEN`.
+- Agent: `MCP_AGENT_TOOL_MAX_STEPS`, `MCP_AGENT_TOOL_USE_VISION`, `MCP_AGENT_TOOL_HISTORY_PATH`.
+- Deep Research: `MCP_RESEARCH_TOOL_SAVE_DIR`, `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS` (default: 1 here).
+- Router: `MCP_TASK_ROUTER_MODE=auto|always-task|always-research`.
+- Unified mode: `MCP_RESEARCH_MODE=auto|task|research|deep_research`.
+
+### Search engine options
+
+Control search behavior and redirects when the agent initiates searches or navigates to google.* URLs:
+
+```dotenv
+# Default engine is Bing
+MCP_SEARCH_ENGINE=bing  # options: bing | ddg | google | brave | custom
+
+# Optionally block Google; if true and engine=google, auto-fallback to ddg
+MCP_BLOCK_GOOGLE=false
+
+# Example forcing Bing and blocking Google redirects
+# MCP_SEARCH_ENGINE=bing
+# MCP_BLOCK_GOOGLE=true
+
+# Brave Search (built-in)
+# MCP_SEARCH_ENGINE=brave
+
+# Custom search (two options):
+# A) URL template with {q}
+# MCP_SEARCH_ENGINE=custom
+# MCP_SEARCH_URL_TEMPLATE=https://kagi.com/search?q={q}
+
+# B) Base URL + query param name
+# MCP_SEARCH_ENGINE=custom
+# MCP_SEARCH_ENGINE_URL=https://search.brave.com/search
+# MCP_SEARCH_QUERY_PARAM=q
+```
 
 ## Configuration (Environment Variables)
 
@@ -258,7 +341,7 @@ Configure the server and CLI using environment variables. You can set these in y
 |                                     | `MCP_AGENT_TOOL_SAVE_RECORDING_PATH`           | Optional: Path to save recordings. If not set, recording to file is disabled even if `ENABLE_RECORDING=true`. | ` ` (empty, recording disabled)   |
 |                                     | `MCP_AGENT_TOOL_HISTORY_PATH`                  | Optional: Directory to save agent history JSON files. If not set, history saving is disabled.              | ` ` (empty, history saving disabled) |
 | **Research Tool (MCP_RESEARCH_TOOL_)** |                                             | Settings for the `run_deep_research` tool.                                                                 |                                   |
-|                                     | `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`      | Max parallel browser instances for deep research.                                                          | `3`                               |
+|                                     | `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`      | Max parallel browser instances for deep research.                                                          | `1`                               |
 |                                     | `MCP_RESEARCH_TOOL_SAVE_DIR`                   | Optional: Base directory to save research artifacts. Task ID will be appended. If not set, operates in memory-only mode. | `None`                           |
 | **Paths (MCP_PATHS_)**              |                                                | General path settings.                                                                                     |                                   |
 |                                     | `MCP_PATHS_DOWNLOADS`                          | Optional: Directory for downloaded files. If not set, persistent downloads to a specific path are disabled.  | ` ` (empty, downloads disabled)  |

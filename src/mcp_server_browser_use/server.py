@@ -180,6 +180,16 @@ def serve() -> FastMCP:
     @server.tool()
     async def run_browser_agent(ctx: Context, task: str) -> str:
         logger.info(f"Received run_browser_agent task: {task[:100]}...")
+        # Browsing rules: prefer lightweight completion and handle search engine auto-corrections
+        search_rules = (
+            "Preference: Complete the task directly in a single window/tab when feasible. Avoid spawning multiple tabs/windows unless required. "
+            "Only escalate to a broader multi-source research approach if you encounter blockers or the task explicitly requires synthesis across many sources.\n\n"
+            # Auto-correction handling across engines
+            "Browsing rule: When a search results page shows text like 'Showing results for' and also offers 'Search instead for <literal>', "
+            "click the 'Search instead for' (or equivalent) to force the exact query. This applies to Brave, Bing, DuckDuckGo, and Google. "
+            "Also look for similar UI like 'Did you mean' or 'Including results for' and prefer exact-match links.\n\n"
+        )
+        task = f"{''.join(search_rules)}{task}"
         agent_task_id = str(uuid.uuid4())
         final_result = "Error: Agent execution failed."
 
@@ -332,6 +342,143 @@ def serve() -> FastMCP:
             report_content = f"Error: {e}"
 
         return report_content
+
+    @server.tool()
+    async def run_task(
+        ctx: Context,
+        task: str,
+        max_parallel_browsers_override: Optional[int] = None,
+    ) -> str:
+        """
+        Smart router that prefers the lightweight browser task and escalates to deep research only when needed.
+
+        Routing modes (env MCP_TASK_ROUTER_MODE):
+        - auto (default): heuristics choose between task and deep_research
+        - always-task: always use run_browser_agent
+        - always-research: always use run_deep_research
+        """
+        mode = os.getenv("MCP_TASK_ROUTER_MODE", "auto").lower()
+        logger.info(f"Router received task (mode={mode}): {task[:100]}...")
+
+        def needs_deep_research(text: str) -> bool:
+            t = text.lower()
+            simple_patterns = [
+                "open github", "go to github", "open readme", "open documentation", "read docs", "install guide",
+                "open website", "navigate to", "visit https://", "go to https://", "open url",
+                "search for", "find repo", "open repo"
+            ]
+            complex_markers = [
+                "write a report", "compare", "synthesize", "summarize across", "survey", "state of the art",
+                "multiple sources", "gather sources", "citation", "references", "deep research", "investigate",
+                "root cause", "troubleshoot", "doesn't work", "error log", "fix bug", "unknown issue",
+            ]
+            # If explicitly mentions deep research or multi-source synthesis, escalate
+            if any(p in t for p in complex_markers):
+                return True
+            # If it looks like straightforward navigation/search, keep it light
+            if any(p in t for p in simple_patterns):
+                return False
+            # Fallback: short tasks likely simple, long descriptive prompts more likely research
+            return len(t) > 240
+
+        if mode == "always-task":
+            return await run_browser_agent(ctx, task)  # type: ignore
+        if mode == "always-research":
+            return await run_deep_research(ctx, task, max_parallel_browsers_override)  # type: ignore
+
+        # auto mode
+        if needs_deep_research(task):
+            logger.info("Router: escalating to deep research based on heuristic.")
+            return await run_deep_research(ctx, task, max_parallel_browsers_override)  # type: ignore
+        else:
+            logger.info("Router: using lightweight task (browser agent).")
+            return await run_browser_agent(ctx, task)  # type: ignore
+
+    @server.tool()
+    async def run_research(
+        ctx: Context,
+        topic_or_task: str,
+        mode: Optional[str] = None,
+        max_parallel_browsers_override: Optional[int] = None,
+    ) -> str:
+        """
+        Unified entry point for browser work with modes:
+        - auto (default): choose between task, research (lightweight), and deep_research
+        - task: concrete UI/browser actions (e.g., Cloudflare DNS, consoles)
+        - research: lightweight research/summarization using a single browser agent
+        - deep_research: full deep research pipeline
+
+        Env override: MCP_RESEARCH_MODE=auto|task|research|deep_research
+        """
+        env_mode = os.getenv("MCP_RESEARCH_MODE", "auto").lower()
+        effective_mode = (mode or env_mode or "auto").lower()
+        text = topic_or_task or ""
+
+        logger.info(f"run_research received (mode={effective_mode}): {text[:120]}...")
+
+        def needs_deep_research(t: str) -> bool:
+            s = t.lower()
+            complex_markers = [
+                "write a report", "compare", "synthesize", "summarize across", "survey", "state of the art",
+                "multiple sources", "gather sources", "citation", "references", "deep research", "investigate",
+                "root cause", "troubleshoot", "doesn't work", "error log", "fix bug", "unknown issue",
+            ]
+            if any(p in s for p in complex_markers):
+                return True
+            return len(s) > 300
+
+        def looks_like_task(t: str) -> bool:
+            s = t.lower()
+            task_markers = [
+                "open ", "navigate to", "go to", "visit ", "click ", "log in", "login", "sign in",
+                "dashboard", "console", "settings", "configure", "enable", "disable", "create record",
+                "add record", "dns", "cloudflare", "github actions", "pipeline", "repo settings",
+                "fill", "form", "upload", "download", "submit", "delete", "remove", "rename",
+            ]
+            return any(p in s for p in task_markers)
+
+        def looks_like_research(t: str) -> bool:
+            s = t.lower()
+            research_markers = [
+                "what is", "how does", "why is", "explain", "overview", "pros and cons", "alternatives",
+                "tutorial", "examples", "guide", "docs", "documentation", "latest", "news", "compare",
+                "benchmark", "performance", "advantages", "disadvantages", "roadmap",
+            ]
+            return any(p in s for p in research_markers)
+
+        # Honor explicit modes first
+        if effective_mode in {"task", "research", "deep_research"}:
+            chosen_mode = effective_mode
+        else:
+            # auto routing
+            if needs_deep_research(text):
+                chosen_mode = "deep_research"
+            elif looks_like_task(text):
+                chosen_mode = "task"
+            elif looks_like_research(text):
+                chosen_mode = "research"
+            else:
+                # default to lightweight task to err on the side of minimal resource usage
+                chosen_mode = "task"
+
+        logger.info(f"run_research routing to: {chosen_mode}")
+
+        if chosen_mode == "deep_research":
+            return await run_deep_research(ctx, text, max_parallel_browsers_override)  # type: ignore
+
+        # Lightweight path uses run_browser_agent with a small, mode-specific prefix
+        if chosen_mode == "task":
+            prefix = (
+                "Mode: TASK. Perform the concrete browser actions requested (navigation, forms, toggles, settings). "
+                "Favor a single window/tab; act directly and stop when the task is done.\n\n"
+            )
+        else:  # research
+            prefix = (
+                "Mode: RESEARCH. Find information, read carefully, and summarize the key findings with links to sources. "
+                "Prefer minimal tabs; do not change account settings or perform account logins.\n\n"
+            )
+
+        return await run_browser_agent(ctx, f"{prefix}{text}")  # type: ignore
 
     return server
 

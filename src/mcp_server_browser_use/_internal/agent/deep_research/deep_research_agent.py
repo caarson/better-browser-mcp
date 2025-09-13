@@ -74,6 +74,7 @@ async def run_single_browser_task(
 
     bu_browser = None
     bu_browser_context = None
+    task_key = None
     try:
         logger.info(f"Starting browser task for query: {task_query}")
         extra_args = [f"--window-size={window_w},{window_h}"]
@@ -112,15 +113,17 @@ async def run_single_browser_task(
         # Construct the task prompt for BrowserUseAgent
         # Instruct it to find specific info and return title/URL
         bu_task_prompt = f"""
+        Browsing rule: When a search results page shows text like 'Showing results for' and also offers 'Search instead for <literal>', click the 'Search instead for' (or equivalent) to force the exact query. This applies to Brave, Bing, DuckDuckGo, and Google. Also look for similar UI like 'Did you mean' or 'Including results for' and prefer exact-match links.
+
         Research Task: {task_query}
-        Objective: Find relevant information answering the query.
-        Output Requirements: For each relevant piece of information found, please provide:
-        1. A concise summary of the information.
-        2. The title of the source page or document.
-        3. The URL of the source.
-        Focus on accuracy and relevance. Avoid irrelevant details.
-        PDF cannot directly extract _content, please try to download first, then using read_file, if you can't save or read, please try other methods.
-        """
+            Objective: Find relevant information answering the query.
+            Output Requirements: For each relevant piece of information found, please provide:
+            1. A concise summary of the information.
+            2. The title of the source page or document.
+            3. The URL of the source.
+            Focus on accuracy and relevance. Avoid irrelevant details.
+            PDF cannot directly extract _content, please try to download first, then using read_file, if you can't save or read, please try other methods.
+            """
 
         bu_agent_instance = BrowserUseAgent(
             task=bu_task_prompt,
@@ -178,7 +181,7 @@ async def run_single_browser_task(
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
 
-        if task_key in _BROWSER_AGENT_INSTANCES:
+        if task_key and task_key in _BROWSER_AGENT_INSTANCES:
             del _BROWSER_AGENT_INSTANCES[task_key]
 
 
@@ -288,7 +291,7 @@ class DeepResearchState(TypedDict):
     # messages: Sequence[BaseMessage] # History for ReAct-like steps within nodes
     llm: Any  # The LLM instance
     tools: List[Tool]
-    output_dir: Path
+    output_dir: Optional[Path]
     browser_config: Dict[str, Any]
     final_report: Optional[str]
     current_step_index: int  # To track progress through the plan
@@ -396,7 +399,7 @@ async def planning_node(state: DeepResearchState) -> Dict[str, Any]:
         # Maybe add logic here to let LLM review and potentially adjust the plan
         # based on existing_results, but for now, we just use the loaded plan.
         if output_dir:
-            _save_plan_to_md(existing_plan, output_dir)  # Ensure it's saved initially if output_dir exists
+            _save_plan_to_md(existing_plan, str(output_dir))  # Ensure it's saved initially if output_dir exists
         return {"research_plan": existing_plan}  # Return the loaded plan
 
     logger.info(f"Generating new research plan for topic: {topic}")
@@ -444,7 +447,7 @@ async def planning_node(state: DeepResearchState) -> Dict[str, Any]:
 
         logger.info(f"Generated research plan with {len(new_plan)} steps.")
         if output_dir:
-            _save_plan_to_md(new_plan, output_dir)
+            _save_plan_to_md(new_plan, str(output_dir))
 
         return {
             "research_plan": new_plan,
@@ -510,12 +513,12 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
 
         tool_results = []
         executed_tool_names = []
+        current_search_results = state.get('search_results', [])
 
         if not isinstance(ai_response, AIMessage) or not ai_response.tool_calls:
             # LLM didn't call a tool. Maybe it answered directly? Or failed?
             logger.warning(
                 f"LLM did not call any tool for step {current_step['step']}. Response: {ai_response.content[:100]}...")
-            # How to handle this? Mark step as failed? Or store the content?
             # Let's mark as failed for now, assuming a tool was expected.
             current_step['status'] = 'failed'
             current_step['result_summary'] = "LLM did not use a tool as expected."
@@ -565,12 +568,9 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
                 logger.info(f"Tool '{tool_name}' executed successfully.")
                 browser_tool_called = "parallel_browser_search" in executed_tool_names
                 # Append result to overall search results
-                current_search_results = state.get('search_results', [])
                 if browser_tool_called:  # Specific handling for browser tool output
                     current_search_results.extend(tool_output)
                 else:  # Handle other tool outputs (e.g., file tools return strings)
-                    # Store it associated with the step? Or a generic log?
-                    # Let's just log it for now. Need better handling for diverse tool outputs.
                     logger.info(f"Result from tool '{tool_name}': {str(tool_output)[:200]}...")
 
                 # Store result for potential next LLM call (if we were doing multi-turn)
@@ -585,8 +585,7 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
                     content=f"Error executing tool {tool_name}: {e}",
                     tool_call_id=tool_call_id
                 ))
-                # Also update overall state search_results with error?
-                current_search_results = state.get('search_results', [])
+                # Also update overall state search_results with error
                 current_search_results.append(
                     {"tool_name": tool_name, "args": tool_args, "status": "failed", "error": str(e)})
 
@@ -598,12 +597,13 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
         if step_failed:
             logger.warning(f"Step {current_step['step']} failed or did not yield results via browser search.")
             current_step['status'] = 'failed'
-            current_step[
-                'result_summary'] = f"Tool execution failed or browser tool not used. Errors: {[tr.content for tr in tool_results if 'Error' in str(tr.content)]}"
+            current_step['result_summary'] = (
+                f"Tool execution failed or browser tool not used. Errors: "
+                f"{[tr.content for tr in tool_results if 'Error' in str(tr.content)]}"
+            )
         else:
             logger.info(f"Step {current_step['step']} completed using tool(s): {executed_tool_names}.")
             current_step['status'] = 'completed'
-
             current_step['result_summary'] = f"Executed tool(s): {', '.join(executed_tool_names)}."
 
         if output_dir:
@@ -615,7 +615,6 @@ async def research_execution_node(state: DeepResearchState) -> Dict[str, Any]:
             "search_results": current_search_results,  # Update with new results
             "current_step_index": current_index + 1,
             "messages": state["messages"] + current_task_message + [ai_response] + tool_results,
-            # Optionally return the tool_results messages if needed by downstream nodes
         }
 
     except Exception as e:
@@ -808,15 +807,17 @@ class DeepResearchAgent:
                 logger.info("Setting up MCP client and tools...")
                 if not self.mcp_client:
                     self.mcp_client = await setup_mcp_client_and_tools(self.mcp_server_config)
-                mcp_tools = self.mcp_client.get_tools()
-                logger.info(f"Loaded {len(mcp_tools)} MCP tools.")
-                tools.extend(mcp_tools)
+                client = self.mcp_client
+                if client:
+                    mcp_tools = client.get_tools()
+                    logger.info(f"Loaded {len(mcp_tools)} MCP tools.")
+                    tools.extend(mcp_tools)
             except Exception as e:
                 logger.error(f"Failed to set up MCP tools: {e}", exc_info=True)
         elif self.mcp_server_config:
             logger.warning("MCP server config provided, but setup function unavailable.")
         tools_map = {tool.name: tool for tool in tools}
-        return tools_map.values()
+        return list(tools_map.values())
 
     async def close_mcp_client(self):
         if self.mcp_client:
@@ -854,8 +855,7 @@ class DeepResearchAgent:
         app = workflow.compile()
         return app
 
-    async def run(self, topic: str, save_dir: Optional[str] = None, task_id: Optional[str] = None, max_parallel_browsers: int = 1) -> Dict[
-        str, Any]:
+    async def run(self, topic: str, save_dir: Optional[str] = None, task_id: Optional[str] = None, max_parallel_browsers: int = 1) -> Dict[str, Any]:
         """
         Starts the deep research process.
 
@@ -873,14 +873,14 @@ class DeepResearchAgent:
             return {"status": "error", "message": "Agent already running.", "task_id": self.current_task_id}
 
         self.current_task_id = task_id if task_id else str(uuid.uuid4())
-        output_dir = None
+        output_dir: Optional[Path] = None
 
         if save_dir:
-            output_dir = os.path.join(save_dir, self.current_task_id)
-            os.makedirs(output_dir, exist_ok=True)
-            logger.info(f"[AsyncGen] Output directory: {output_dir}")
+            output_dir = Path(save_dir) / self.current_task_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"[AsyncGen] Output directory: {str(output_dir)}")
         else:
-            logger.info(f"[AsyncGen] Running in memory-only mode (no save_dir provided)")
+            logger.info("[AsyncGen] Running in memory-only mode (no save_dir provided)")
 
         logger.info(f"[AsyncGen] Starting research task ID: {self.current_task_id} for topic: '{topic}'")
 
@@ -903,17 +903,24 @@ class DeepResearchAgent:
             "error_message": None,
         }
 
-        loaded_state = {}
+        loaded_state: Dict[str, Any] = {}
         if task_id and output_dir:
             # Only try to resume from files if we have a task_id and output_dir
             logger.info(f"Attempting to resume task {task_id}...")
-            loaded_state = _load_previous_state(task_id, output_dir)
-            initial_state.update(loaded_state)
+            loaded_state = _load_previous_state(task_id, str(output_dir))
+            # Merge only known keys to satisfy typing
+            for key in [
+                "research_plan",
+                "current_step_index",
+                "search_results",
+                "error_message",
+            ]:
+                if key in loaded_state:
+                    initial_state[key] = loaded_state[key]
             if loaded_state.get("research_plan"):
                 logger.info(
                     f"Resuming with {len(loaded_state['research_plan'])} plan steps and {len(loaded_state.get('search_results', []))} existing results.")
-                initial_state[
-                    "topic"] = topic  # Allow overriding topic even when resuming? Or use stored topic? Let's use new one.
+                initial_state["topic"] = topic  # Allow overriding topic even when resuming
             else:
                 logger.warning(f"Resume requested for {task_id}, but no previous plan found. Starting fresh.")
                 initial_state["current_step_index"] = 0
@@ -977,8 +984,8 @@ class DeepResearchAgent:
 
             # Add report file path if we have an output directory and a final report was generated
             if output_dir and final_state and final_state.get("final_report"):
-                report_path = os.path.join(output_dir, REPORT_FILENAME)
-                result["report_file_path"] = report_path
+                report_path = output_dir / REPORT_FILENAME
+                result["report_file_path"] = str(report_path)
 
             return result
 

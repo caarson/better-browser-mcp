@@ -86,7 +86,7 @@ class AgentToolSettings(BaseSettings):
 class DeepResearchToolSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MCP_RESEARCH_TOOL_")
 
-    max_parallel_browsers: int = Field(default=3, env="MAX_PARALLEL_BROWSERS")
+    max_parallel_browsers: int = Field(default=1, env="MAX_PARALLEL_BROWSERS")
     save_dir: Optional[str] = Field(default=None, env="SAVE_DIR") # Base dir, task_id will be appended. Optional now.
 
 
