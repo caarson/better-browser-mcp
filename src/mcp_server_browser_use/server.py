@@ -263,7 +263,7 @@ def serve() -> FastMCP:
     async def run_deep_research(
         ctx: Context,
         research_task: str,
-        max_parallel_browsers_override: Optional[int] = None,
+        max_windows: Optional[int] = None,
     ) -> str:
         logger.info(f"Received run_deep_research task: {research_task[:100]}...")
         task_id = str(uuid.uuid4()) # This task_id is used for the sub-directory name
@@ -301,7 +301,7 @@ def serve() -> FastMCP:
                 mcp_server_config=mcp_server_config_for_agent,
             )
 
-            current_max_parallel_browsers = max_parallel_browsers_override if max_parallel_browsers_override is not None else settings.research_tool.max_parallel_browsers
+            current_max_parallel_browsers = max_windows if max_windows is not None else settings.research_tool.max_parallel_browsers
 
             # Check if save_dir is provided, otherwise use in-memory approach
             save_dir_for_this_task = None
@@ -312,7 +312,7 @@ def serve() -> FastMCP:
             else:
                 logger.info("No save_dir configured. Deep research will operate in memory-only mode.")
 
-            logger.info(f"Using max_parallel_browsers: {current_max_parallel_browsers}")
+            logger.info(f"Using max_parallel_browsers (max_windows): {current_max_parallel_browsers}")
 
             result_dict = await agent_instance.run(
                 topic=research_task,
@@ -347,7 +347,7 @@ def serve() -> FastMCP:
     async def run_task(
         ctx: Context,
         task: str,
-        max_parallel_browsers_override: Optional[int] = None,
+        max_windows: Optional[int] = None,
     ) -> str:
         """
         Smart router that prefers the lightweight browser task and escalates to deep research only when needed.
@@ -384,12 +384,12 @@ def serve() -> FastMCP:
         if mode == "always-task":
             return await run_browser_agent(ctx, task)  # type: ignore
         if mode == "always-research":
-            return await run_deep_research(ctx, task, max_parallel_browsers_override)  # type: ignore
+            return await run_deep_research(ctx, task, max_windows)  # type: ignore
 
         # auto mode
         if needs_deep_research(task):
             logger.info("Router: escalating to deep research based on heuristic.")
-            return await run_deep_research(ctx, task, max_parallel_browsers_override)  # type: ignore
+            return await run_deep_research(ctx, task, max_windows)  # type: ignore
         else:
             logger.info("Router: using lightweight task (browser agent).")
             return await run_browser_agent(ctx, task)  # type: ignore
@@ -399,7 +399,7 @@ def serve() -> FastMCP:
         ctx: Context,
         topic_or_task: str,
         mode: Literal["auto", "task", "research", "deep_research"] = "auto",
-        max_parallel_browsers_override: Optional[int] = None,
+        max_windows: Optional[int] = None,
     ) -> str:
         """
         Unified entry point for browser work with modes:
@@ -465,7 +465,7 @@ def serve() -> FastMCP:
         logger.info(f"run_research routing to: {chosen_mode}")
 
         if chosen_mode == "deep_research":
-            return await run_deep_research(ctx, text, max_parallel_browsers_override)  # type: ignore
+            return await run_deep_research(ctx, text, max_windows)  # type: ignore
 
         # Lightweight path uses run_browser_agent with a small, mode-specific prefix
         if chosen_mode == "task":
@@ -485,13 +485,13 @@ def serve() -> FastMCP:
     async def run_auto(
         ctx: Context,
         topic_or_task: str,
-        max_parallel_browsers_override: Optional[int] = None,
+        max_windows: Optional[int] = None,
     ) -> str:
         """
         Auto-select between task, research, and deep_research based on heuristics.
         This is equivalent to calling run_research(..., mode="auto").
         """
-        return await run_research(ctx, topic_or_task, mode="auto", max_parallel_browsers_override=max_parallel_browsers_override)  # type: ignore
+        return await run_research(ctx, topic_or_task, mode="auto", max_windows=max_windows)  # type: ignore
 
     return server
 

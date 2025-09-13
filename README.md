@@ -30,28 +30,19 @@ Everything you expect from the original—plus pragmatic upgrades:
 - Unified tool: `run_research` with modes `auto | task | research | deep_research` (auto chooses the lightest viable path).
 - Smarter resource use: favors single-window tasks; deep research defaults to 1 parallel browser (configurable).
 - Search engine control: default Bing; supports DuckDuckGo, Brave, Google, or a custom engine template.
-3.  **`run_task`**
-- Better search UX: agents click “Search instead for …” across engines to avoid query autocorrections.
-- Task-ready prompts: “task” mode targets dashboards, settings, and forms (e.g., Cloudflare DNS) without heavy research.
-
-All changes are opt-in via env vars and preserve backward compatibility with existing tools.
-
-## Quick Start
-4.  **`run_deep_research`**
+1.  **`run_auto`**
+  *   **Description:** Auto-selects between `task`, `research`, and `deep_research` using the same heuristics as `run_research(mode="auto")`.
+  *   **Arguments:**
+    *   `topic_or_task` (string, required): The prompt describing the task or research topic.
+    *   `max_windows` (integer, optional): Upper bound on how many browser windows can be used in parallel (only applied when deep research is selected).
+  *   **Returns:** (string) Final result or research report string.
 ### The Essentials
-
-1. Install UV - the rocket-powered Python installer:
-`curl -LsSf https://astral.sh/uv/install.sh | sh`
-
-2. Get Playwright browsers (required for automation):
-   - Preferred (GitHub fork while PR is pending):
-     `uvx --from git+https://github.com/caarson/mcp-browser-use python -m playwright install`
-   - Alternative (PyPI release):
+2.  **`run_research`**
      `uvx --from mcp-server-browser-use@latest python -m playwright install`
 
 ### Integration Patterns
 
-For MCP clients like Claude Desktop, add a server configuration. Prefer the GitHub fork until the PR is merged; a PyPI example is also included.
+    *   `max_windows` (integer, optional): Upper bound on how many browser windows can be used in parallel (only applied when deep research is selected).
 
 ```json
 // Example 1A: Use GitHub fork (preferred while PR pending)
@@ -184,11 +175,11 @@ This server exposes the following tools via the Model Context Protocol:
   *   **Returns:** (string) Final result or research report string.
   *   **Env override:** `MCP_RESEARCH_MODE=auto|task|research|deep_research` (default: `auto`).
 
-2.  **`run_task`**
+3.  **`run_task`**
   *   **Description:** Smart router that prefers the lightweight task flow and only escalates to deep research when needed. Controlled by `MCP_TASK_ROUTER_MODE`.
   *   **Arguments:**
     *   `task` (string, required): The primary task or objective.
-    *   `max_parallel_browsers_override` (integer, optional): Passed through if deep research is chosen.
+    *   `max_windows` (integer, optional): Passed through if deep research is chosen to cap parallel windows.
   *   **Returns:** (string) The final result or deep research report string.
 
 3.  **`run_browser_agent`**
@@ -200,8 +191,8 @@ This server exposes the following tools via the Model Context Protocol:
 4.  **`run_deep_research`**
     *   **Description:** Performs in-depth web research on a topic, generates a report, and waits for completion. Uses settings from `MCP_RESEARCH_TOOL_*`, `MCP_LLM_*`, and `MCP_BROWSER_*` environment variables. If `MCP_RESEARCH_TOOL_SAVE_DIR` is set, outputs are saved to a subdirectory within it; otherwise, operates in memory-only mode.
     *   **Arguments:**
-        *   `research_task` (string, required): The topic or question for the research.
-        *   `max_parallel_browsers` (integer, optional): Overrides `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS` from environment.
+    *   `research_task` (string, required): The topic or question for the research.
+    *   `max_windows` (integer, optional): Overrides `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS` from environment (caps simultaneous windows used by sub-agents).
     *   **Returns:** (string) The generated research report in Markdown format, including the file path (if saved), or an error message.
 
 ## CLI Usage
