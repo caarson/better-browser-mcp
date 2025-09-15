@@ -38,8 +38,8 @@ from browser_use.browser.browser import BrowserConfig
 from mcp.server.fastmcp import Context, FastMCP
 
 # Import from _internal
-from ._internal.agent.browser_use.browser_use_agent import BrowserUseAgent
-from ._internal.agent.deep_research.deep_research_agent import DeepResearchAgent
+from ._internal.agent.task_agent import TaskAgent
+from ._internal.agent.research_agent import ResearchAgent
 from ._internal.browser.custom_browser import CustomBrowser
 from ._internal.browser.custom_context import (
     CustomBrowserContext,
@@ -225,7 +225,7 @@ def serve() -> FastMCP:
                 agent_history_json_file = str(task_specific_history_dir / f"{agent_task_id}.json")
                 logger.info(f"Agent history will be saved to: {agent_history_json_file}")
 
-            agent_instance = BrowserUseAgent(
+            agent_instance = TaskAgent(
                 task=task,
                 llm=main_llm,
                 browser=browser_instance,
@@ -265,7 +265,8 @@ def serve() -> FastMCP:
     async def run_deep_research(
         ctx: Context,
         research_task: str,
-        max_windows: Optional[int] = None,
+        max_tabs: Optional[int] = None,
+        max_windows: Optional[int] = None,  # deprecated alias
     ) -> str:
         logger.info(f"Received run_deep_research task: {research_task[:100]}...")
         task_id = str(uuid.uuid4()) # This task_id is used for the sub-directory name
@@ -297,13 +298,18 @@ def serve() -> FastMCP:
                 if isinstance(settings.server.mcp_config, str):
                      mcp_server_config_for_agent = json.loads(settings.server.mcp_config)
 
-            agent_instance = DeepResearchAgent(
+            agent_instance = ResearchAgent(
                 llm=research_llm,
                 browser_config=dr_browser_cfg,
                 mcp_server_config=mcp_server_config_for_agent,
             )
 
-            current_max_parallel_browsers = max_windows if max_windows is not None else settings.research_tool.max_windows
+            # Backward compatible selection: prefer explicit max_tabs, then legacy max_windows param, then settings
+            current_max_tabs = (
+                max_tabs if max_tabs is not None else (
+                    max_windows if max_windows is not None else settings.research_tool.max_tabs
+                )
+            )
 
             # Check if save_dir is provided, otherwise use in-memory approach
             save_dir_for_this_task = None
@@ -314,13 +320,13 @@ def serve() -> FastMCP:
             else:
                 logger.info("No save_dir configured. Deep research will operate in memory-only mode.")
 
-            logger.info(f"Using max_windows: {current_max_parallel_browsers}")
+            logger.info(f"Using max_tabs: {current_max_tabs}")
 
             result_dict = await agent_instance.run(
                 topic=research_task,
                 save_dir=save_dir_for_this_task, # Can be None now
                 task_id=task_id, # Pass the generated task_id
-                max_windows=current_max_parallel_browsers
+                max_tabs=current_max_tabs
             )
 
             # Handle the result based on if files were saved or not
@@ -349,7 +355,8 @@ def serve() -> FastMCP:
     async def run_task(
         ctx: Context,
         task: str,
-        max_windows: Optional[int] = None,
+        max_tabs: Optional[int] = None,
+        max_windows: Optional[int] = None,  # deprecated alias
     ) -> str:
         """
         Smart router that prefers the lightweight browser task and escalates to deep research only when needed.
@@ -386,12 +393,12 @@ def serve() -> FastMCP:
         if mode == "always-task":
             return await run_browser_agent(ctx, task)  # type: ignore
         if mode == "always-research":
-            return await run_deep_research(ctx, task, max_windows)  # type: ignore
+            return await run_deep_research(ctx, task, max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
 
         # auto mode
         if needs_deep_research(task):
             logger.info("Router: escalating to deep research based on heuristic.")
-            return await run_deep_research(ctx, task, max_windows)  # type: ignore
+            return await run_deep_research(ctx, task, max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
         else:
             logger.info("Router: using lightweight task (browser agent).")
             return await run_browser_agent(ctx, task)  # type: ignore
@@ -401,7 +408,8 @@ def serve() -> FastMCP:
         ctx: Context,
         topic_or_task: str,
         mode: Literal["auto", "task", "research", "deep_research"] = "auto",
-        max_windows: Optional[int] = None,
+        max_tabs: Optional[int] = None,
+        max_windows: Optional[int] = None,  # deprecated alias
     ) -> str:
         """
         Unified entry point for browser work with modes:
@@ -467,7 +475,7 @@ def serve() -> FastMCP:
         logger.info(f"run_research routing to: {chosen_mode}")
 
         if chosen_mode == "deep_research":
-            return await run_deep_research(ctx, text, max_windows)  # type: ignore
+            return await run_deep_research(ctx, text, max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
 
         # Lightweight path uses run_browser_agent with a small, mode-specific prefix
         if chosen_mode == "task":
@@ -487,13 +495,14 @@ def serve() -> FastMCP:
     async def run_auto(
         ctx: Context,
         topic_or_task: str,
-        max_windows: Optional[int] = None,
+        max_tabs: Optional[int] = None,
+        max_windows: Optional[int] = None,  # deprecated alias
     ) -> str:
         """
         Auto-select between task, research, and deep_research based on heuristics.
         This is equivalent to calling run_research(..., mode="auto").
         """
-        return await run_research(ctx, topic_or_task, mode="auto", max_windows=max_windows)  # type: ignore
+        return await run_research(ctx, topic_or_task, mode="auto", max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
 
     return server
 
@@ -514,10 +523,10 @@ def main():
             "Usage: mcp-server-browser-use [--help] [--version]\n\n"
             "Starts the MCP server on stdio. Configure via environment variables.\n\n"
             "Exposed MCP tools:\n"
-            "  - run_auto(topic_or_task, max_windows?)\n"
-            "  - run_research(topic_or_task, mode=auto|task|research|deep_research, max_windows?)\n"
-            "  - run_task(task, max_windows?)\n"
-            "  - run_deep_research(research_task, max_windows?)\n"
+            "  - run_auto(topic_or_task, max_tabs?)\n"
+            "  - run_research(topic_or_task, mode=auto|task|research|deep_research, max_tabs?)\n"
+            "  - run_task(task, max_tabs?)\n"
+            "  - run_deep_research(research_task, max_tabs?)\n"
         )
         print(usage)
         return

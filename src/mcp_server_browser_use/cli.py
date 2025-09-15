@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 
 from .config import AppSettings, settings as global_settings # Import AppSettings and the global instance
 # Import from _internal
-from ._internal.agent.browser_use.browser_use_agent import BrowserUseAgent
-from ._internal.agent.deep_research.deep_research_agent import DeepResearchAgent
+from ._internal.agent.task_agent import TaskAgent
+from ._internal.agent.research_agent import ResearchAgent
 from ._internal.browser.custom_browser import CustomBrowser
 from ._internal.browser.custom_context import (
     CustomBrowserContext,
@@ -183,7 +183,7 @@ async def _run_browser_agent_logic_cli(task_str: str, current_settings: AppSetti
             logger.info(f"Agent history will be saved to: {agent_history_json_file}")
 
         # Agent Instantiation
-        agent_instance = BrowserUseAgent(
+        agent_instance = TaskAgent(
             task=task_str, llm=main_llm,
             browser=browser_instance, browser_context=context_instance, controller=controller_instance,
             planner_llm=planner_llm,
@@ -209,7 +209,7 @@ async def _run_browser_agent_logic_cli(task_str: str, current_settings: AppSetti
     return final_result
 
 
-async def _run_deep_research_logic_cli(research_task_str: str, max_windows_override: Optional[int], current_settings: AppSettings) -> str:
+async def _run_deep_research_logic_cli(research_task_str: str, max_tabs_override: Optional[int], current_settings: AppSettings) -> str:
     logger.info(f"CLI: Starting run_deep_research task: {research_task_str[:100]}...")
     task_id = str(uuid.uuid4())
     report_content = "Error: Deep research failed."
@@ -236,25 +236,25 @@ async def _run_deep_research_logic_cli(research_task_str: str, max_windows_overr
         if current_settings.server.mcp_config:
             mcp_server_config_for_agent = current_settings.server.mcp_config
             if isinstance(current_settings.server.mcp_config, str):
-                 mcp_server_config_for_agent = json.loads(current_settings.server.mcp_config)
+                mcp_server_config_for_agent = json.loads(current_settings.server.mcp_config)
 
-        agent_instance = DeepResearchAgent(
+        agent_instance = ResearchAgent(
             llm=research_llm, browser_config=dr_browser_cfg,
             mcp_server_config=mcp_server_config_for_agent,
         )
 
-        current_max_parallel_browsers = max_windows_override if max_windows_override is not None else current_settings.research_tool.max_windows
+        current_max_tabs = max_tabs_override if max_tabs_override is not None else current_settings.research_tool.max_tabs
 
         save_dir_for_task: Optional[str] = None
         if current_settings.research_tool.save_dir:
             save_dir_for_task = os.path.join(current_settings.research_tool.save_dir, task_id)
             os.makedirs(save_dir_for_task, exist_ok=True)
             logger.info(f"CLI Deep research save directory: {save_dir_for_task}")
-        logger.info(f"CLI Using max_windows: {current_max_parallel_browsers}")
+        logger.info(f"CLI Using max_tabs: {current_max_tabs}")
 
         result_dict = await agent_instance.run(
             topic=research_task_str, task_id=task_id,
-            save_dir=save_dir_for_task, max_windows=current_max_parallel_browsers
+            save_dir=save_dir_for_task, max_tabs=current_max_tabs
         )
 
         report_file_path = result_dict.get("report_file_path")
@@ -296,13 +296,15 @@ def run_browser_agent(
 @app.command()
 def run_deep_research(
     research_task: str = typer.Argument(..., help="The topic or question for deep research."),
-    max_windows: Optional[int] = typer.Option(
+    max_tabs: Optional[int] = typer.Option(
         None,
-        "--max-windows",
-        "-w",
+        "--max-tabs",
+        "-t",
         "--max-parallel-browsers",  # deprecated alias
         "-p",  # deprecated alias
-        help="Override max windows from settings (applies to deep research). Alias: --max-parallel-browsers/-p (deprecated)",
+        "--max-windows",  # deprecated alias
+        "-w",  # deprecated alias
+        help="Override max tabs (applies to deep research). Backward-compatible aliases: --max-windows/-w and --max-parallel-browsers/-p (deprecated)",
     )
 ):
     """Performs deep web research and prints the report."""
@@ -312,7 +314,7 @@ def run_deep_research(
 
     typer.secho(f"Executing deep research task: {research_task}", fg=typer.colors.GREEN)
     try:
-        result = asyncio.run(_run_deep_research_logic_cli(research_task, max_windows, cli_state.settings))
+        result = asyncio.run(_run_deep_research_logic_cli(research_task, max_tabs, cli_state.settings))
         typer.secho("\n--- Deep Research Final Report ---", fg=typer.colors.BLUE, bold=True)
         print(result)
     except Exception as e:
