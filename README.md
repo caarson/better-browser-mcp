@@ -30,8 +30,6 @@ Everything you expect from the original—plus pragmatic upgrades:
 - Unified tool: `run_research` with modes `auto | task | research | documentation | deep_research` (auto chooses the lightest viable path).
 <img src="./assets/better-browser-mcp-banner.png" alt="Better MCP Browser-Use banner" width="100%" />
 
-# Better MCP Browser-Use
-
 ## Abstract and Explanation
 Practical MCP server for browser automation and web research. Single-window with tabs-only concurrency, smart search control, and a documentation-first mode that extracts headings, API symbols, anchors, and code from official docs.
 
