@@ -1,4 +1,4 @@
-# **Better-MCP-Browser-Use**
+# **Better-Browser-MCP**
 
 
 <img src="./assets/better-browser-mcp-banner.png" alt="Better MCP Browser-Use banner" width="100%" />
