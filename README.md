@@ -38,14 +38,27 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
 ```json
 {
   "mcpServers": {
-    "browser-use": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/caarson/better-browser-mcp", "mcp-server-browser-use"],
+    "github.com/caarson/better-browser-mcp": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 500000,
+      "type": "stdio",
+      "command": "C:\\Users\\imitr\\.local\\bin\\uvx.exe",
+      "args": [
+        "--from",
+        "git+https://github.com/caarson/better-browser-mcp",
+        "mcp-server-browser-use"
+      ],
       "env": {
-        "MCP_LLM_PROVIDER": "google",
-        "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY",
-        "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
-        "MCP_BROWSER_HEADLESS": "true"
+        "MCP_LLM_PROVIDER": "openai",
+        "MCP_LLM_BASE_URL": "http://127.0.0.1:8088/v1",
+        "MCP_LLM_OPENAI_API_KEY": "lm-studio",
+        "MCP_LLM_MODEL_NAME": "nvidia_nvidia-nemotron-nano-9b-v2@q3_k_l",
+        "MCP_BROWSER_HEADLESS": "false",
+        "MCP_SERVER_LOGGING_LEVEL": "DEBUG",
+        "MCP_AGENT_TOOL_USE_VISION": "false",
+        "MCP_SEARCH_ENGINE": "brave",
+        "MCP_BLOCK_GOOGLE": "true"
       }
     }
   }

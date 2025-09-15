@@ -212,14 +212,17 @@ async def _run_browser_agent_logic_cli(task_str: str, current_settings: AppSetti
 async def _run_documentation_logic_cli(topic_str: str, current_settings: AppSettings) -> str:
     """Run a documentation-focused task using the BrowserUseAgent with a tailored prefix."""
     doc_prefix = (
-        "Mode: DOCUMENTATION. Your goal is to find and read the most relevant official documentation or API references, "
-        "then provide a concise, accurate summary with links and any critical code snippets.\n"
-        "- Prefer official sources (e.g., oracle.com docs, javadoc.io, developer.mozilla.org, docs.python.org, docs.rs).\n"
-        "- Use documentation-oriented actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, "
-        "identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
-        "- On search result pages that say 'Showing results for' with a 'Search instead for <literal>' link, click the exact-match link.\n"
-        "- Keep a single window with minimal tabs. Avoid logins, avoid changing account settings.\n"
-        "- When summarizing, include: page title, 1-3 key points, API signatures, and direct links (anchors) to sections.\n\n"
+        "Mode: DOCUMENTATION. Start with a brief plan: identify the target technology, scope (API/class/package), and key questions. "
+        "Prefer official documentation or API references; keep requests efficient with minimal tabs.\n"
+        "- Sources to prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
+        "- Heuristics to detect doc sites: look for navigation like 'Packages/Classes/Index' (Java), breadcrumbs, API signature blocks, and site domains above.\n"
+        "- If the topic appears Java-related (mentions class/package/interface, or 'javadoc'): try javadoc.io or Oracle Java SE API index; otherwise perform a targeted doc search.\n"
+        "- Use documentation actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
+        "- On search pages showing 'Showing results for' with 'Search instead for <literal>', click the exact-match link.\n"
+        "- Keep a single window with minimal tabs. Avoid logins or account changes.\n"
+        "- Before reading a specific page, get a quick orientation: what the page covers and which sections matter for the task.\n"
+        "- Efficiency: Perform at most 1–3 searches, then focus on reading the most relevant doc page.\n"
+        "- Completion: When done, CALL THE 'done' ACTION with a FINAL SUMMARY including: page title, 1–3 key points, relevant API signatures, and direct links (anchors).\n\n"
     )
     return await _run_browser_agent_logic_cli(f"{doc_prefix}{topic_str}", current_settings)
 

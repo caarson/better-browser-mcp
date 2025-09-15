@@ -197,7 +197,9 @@ def serve() -> FastMCP:
         # Browsing rules: prefer lightweight completion and handle search engine auto-corrections
         search_rules = (
             "Preference: Complete the task directly in a single window/tab when feasible. Avoid spawning multiple tabs/windows unless required. "
-            "Only escalate to a broader multi-source research approach if you encounter blockers or the task explicitly requires synthesis across many sources.\n\n"
+            "Only escalate to a broader multi-source research approach if you encounter blockers or the task explicitly requires synthesis across many sources.\n"
+            "Efficiency: Keep requests lean; perform at most 1–3 searches before reading and extracting from a likely best doc page.\n"
+            "Completion: When you reach a conclusion, CALL THE 'done' ACTION with your final answer/summary so the session has a final result.\n\n"
             # Auto-correction handling across engines
             "Browsing rule: When a search results page shows text like 'Showing results for' and also offers 'Search instead for <literal>', "
             "click the 'Search instead for' (or equivalent) to force the exact query. This applies to Brave, Bing, DuckDuckGo, and Google. "
@@ -502,14 +504,16 @@ def serve() -> FastMCP:
             )
         elif chosen_mode == "documentation":
             prefix = (
-                "Mode: DOCUMENTATION. Your goal is to find and read the most relevant official documentation or API references, "
-                "then provide a concise, accurate summary with links and any critical code snippets.\n"
-                "- Prefer official sources (e.g., oracle.com docs, javadoc.io, developer.mozilla.org, docs.python.org, docs.rs).\n"
-                "- Use documentation-oriented actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, "
-                "identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
-                "- On search result pages that say 'Showing results for' with a 'Search instead for <literal>' link, click the exact-match link.\n"
-                "- Keep a single window with minimal tabs. Avoid logins, avoid changing account settings.\n"
-                "- When summarizing, include: page title, 1-3 key points, API signatures, and direct links (anchors) to sections.\n\n"
+                "Mode: DOCUMENTATION. Begin with a brief plan: identify target tech (library/runtime), scope (API/class/package), and 2–3 concise queries. "
+                "Prefer official documentation and API references; keep requests efficient and tabs minimal.\n"
+                "- Prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
+                "- Doc-site detection heuristics: look for 'Packages/Classes/Index' (Java), API signature blocks, breadcrumbs, and the domains above.\n"
+                "- If Java-related (mentions class/package/interface or 'javadoc'): try javadoc.io search or the Oracle Java SE API index; otherwise run a targeted doc search.\n"
+                "- Use doc actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
+                "- On search result pages that say 'Showing results for' and offer 'Search instead for <literal>', click the exact-match link.\n"
+                "- Keep a single window; open at most one extra tab for search when needed, then return to the main doc tab. Avoid logins or account changes.\n"
+                "- Before diving into a specific page, orient: what the page covers, and which sections matter for the task.\n"
+                "- Finish with a FINAL SUMMARY containing: page title, 1–3 key points, relevant API signatures, and direct links (anchors) to sections.\n\n"
             )
         else:  # research
             prefix = (
