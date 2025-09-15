@@ -93,7 +93,7 @@ class CustomController(Controller):
                 lang = language.lower().strip()
                 # Expand to common ecosystems
                 if lang in ("java",):
-                    filters.append("(site:docs.oracle.com OR site:javadoc.io)")
+                    filters.append("(site:docs.oracle.com OR site:javadoc.io OR site:hub.spigotmc.org)")
                 elif lang in ("js", "javascript", "web"):
                     filters.append("site:developer.mozilla.org")
                 elif lang in ("python",):
@@ -126,6 +126,51 @@ class CustomController(Controller):
             )
 
         @self.registry.action(
+            "Perform a documentation search, click the best documentation-site result, scroll to reveal content, detect profile, and extract sections. Returns structured JSON."
+        )
+        async def doc_orient_and_extract(query: str, browser: BrowserContext, language: str | None = None, site: str | None = None, scroll_times: int = 3):
+            try:
+                # 1) Search
+                res1 = await doc_search(query=query, browser=browser, language=language, site=site, new_tab=False)
+                if isinstance(res1, ActionResult) and res1.error:
+                    return res1
+                # 2) Click best doc-site result
+                res2 = await click_best_doc_result(browser=browser)
+                if isinstance(res2, ActionResult) and res2.error:
+                    # If no doc link found, stay on current page and try extraction anyway
+                    pass
+                # 3) Scroll to reveal content
+                try:
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+                _ = await self.registry.execute_action("scroll_down", {"times": int(scroll_times)}, browser=browser, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+                # 4) Identify doc profile
+                prof = await identify_doc_profile(browser=browser)
+                prof_payload = {}
+                if isinstance(prof, ActionResult) and prof.extracted_content:
+                    try:
+                        prof_payload = json.loads(prof.extracted_content)
+                    except Exception:
+                        prof_payload = {"raw": prof.extracted_content}
+                # 5) Extract sections
+                ext = await fetch_doc_sections_auto(browser=browser, max_items=200, include_html=False)
+                ext_payload = {}
+                if isinstance(ext, ActionResult) and ext.extracted_content:
+                    try:
+                        ext_payload = json.loads(ext.extracted_content)
+                    except Exception:
+                        ext_payload = {"raw": ext.extracted_content}
+                payload = json.dumps({
+                    "query": query,
+                    "profile": prof_payload,
+                    "extracted": ext_payload,
+                }, ensure_ascii=False)
+                return ActionResult(extracted_content=payload, include_in_memory=True)
+            except Exception as e:
+                return ActionResult(error=f"doc_orient_and_extract failed: {e}")
+
+        @self.registry.action(
             "Click the top documentation-site result on the current search page."
         )
         async def click_best_doc_result(
@@ -154,6 +199,7 @@ class CustomController(Controller):
                 default_allowed = {
                     "docs.oracle.com",
                     "javadoc.io",
+                    "hub.spigotmc.org",
                     "developer.mozilla.org",
                     "docs.python.org",
                     "docs.rs",
@@ -181,7 +227,7 @@ class CustomController(Controller):
                     if any(dom in host_l for dom in default_allowed):
                         score += 10
                     # API/doc path hints
-                    if any(seg in path_l for seg in ["/api", "/docs", "/javadoc", "/reference", "/documentation"]):
+                    if any(seg in path_l for seg in ["/api", "/docs", "/javadoc", "/javadocs", "/reference", "/documentation"]):
                         score += 4
                     # Node API special-case
                     if host_l.endswith("nodejs.org") and "/api" in path_l:
@@ -440,7 +486,7 @@ class CustomController(Controller):
                     profile = "node_api"
                 elif "learn.microsoft.com" in url and "/dotnet/" in url:
                     profile = "dotnet_api"
-                elif "docs.oracle.com" in url or "javadoc.io" in url:
+                elif "docs.oracle.com" in url or "javadoc.io" in url or "hub.spigotmc.org" in url:
                     profile = "java_docs"
                 elif "developer.apple.com/documentation" in url:
                     profile = "apple_docs"

@@ -509,10 +509,10 @@ def serve() -> FastMCP:
                 "- Prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
                 "- Doc-site detection heuristics: look for 'Packages/Classes/Index' (Java), API signature blocks, breadcrumbs, and the domains above.\n"
                 "- If Java-related (mentions class/package/interface or 'javadoc'): try javadoc.io search or the Oracle Java SE API index; otherwise run a targeted doc search.\n"
-                "- Use doc actions when appropriate: doc_search, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
+                "- Use doc actions when appropriate: doc_search, doc_orient_and_extract, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections, scroll_down, collect_doc_overview, open_anchor_by_text.\n"
                 "- On search result pages that say 'Showing results for' and offer 'Search instead for <literal>', click the exact-match link.\n"
                 "- Keep a single window; open at most one extra tab for search when needed, then return to the main doc tab. Avoid logins or account changes.\n"
-                "- After landing on a doc page: scroll 2–3 times to reveal content; then run identify_doc_profile. If profile=java_docs, use fetch_java_doc_sections; otherwise use fetch_doc_sections_auto and/or extract_main_content.\n"
+                "- After landing on a doc page: scroll 2–3 times (scroll_down) to reveal content; then run identify_doc_profile. If profile=java_docs, use fetch_java_doc_sections; otherwise use fetch_doc_sections_auto and/or extract_main_content.\n"
                 "  On Oracle Java API index pages, navigate via Packages/Classes links to the relevant class or method section before summarizing.\n"
                 "- Finish with a FINAL SUMMARY containing: page title, 1–3 key points, relevant API signatures, and direct links (anchors) to sections.\n\n"
             )
