@@ -21,7 +21,7 @@ Practical MCP server for browser automation and web research. Single-window with
 
 ```powershell
 $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "uvx" };
-& $uvx --from git+https://github.com/caarson/mcp-browser-use@main python -m playwright install
+& $uvx --from git+https://github.com/caarson/better-browser-mcp@main python -m playwright install
 ```
 
 2) Run the server:
@@ -30,7 +30,7 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
 $env:MCP_SERVER_LOGGING_LEVEL = "INFO"
 $env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"
 $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "uvx" };
-& $uvx --from git+https://github.com/caarson/mcp-browser-use@main mcp-server-browser-use
+& $uvx --from git+https://github.com/caarson/better-browser-mcp@main mcp-server-browser-use
 ```
 
 3) Minimal MCP client config:
@@ -40,7 +40,7 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
   "mcpServers": {
     "browser-use": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/caarson/mcp-browser-use", "mcp-server-browser-use"],
+      "args": ["--from", "git+https://github.com/caarson/better-browser-mcp", "mcp-server-browser-use"],
       "env": {
         "MCP_LLM_PROVIDER": "google",
         "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY",
