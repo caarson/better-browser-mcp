@@ -506,6 +506,7 @@ def serve() -> FastMCP:
             prefix = (
                 "Mode: DOCUMENTATION. Begin with a brief plan: identify target tech (library/runtime), scope (API/class/package), and 2–3 concise queries. "
                 "Prefer official documentation and API references; keep requests efficient and tabs minimal.\n"
+                "- First action: call doc_orient_and_extract with the EXACT topic_or_task. If it mentions Java/Javadoc/Spigot/Bukkit/Paper, pass language='java'.\n"
                 "- Prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
                 "- Doc-site detection heuristics: look for 'Packages/Classes/Index' (Java), API signature blocks, breadcrumbs, and the domains above.\n"
                 "- If Java-related (mentions class/package/interface or 'javadoc'): try javadoc.io search or the Oracle Java SE API index; otherwise run a targeted doc search.\n"

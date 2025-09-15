@@ -214,6 +214,7 @@ async def _run_documentation_logic_cli(topic_str: str, current_settings: AppSett
     doc_prefix = (
         "Mode: DOCUMENTATION. Start with a brief plan: identify the target technology, scope (API/class/package), and key questions. "
         "Prefer official documentation or API references; keep requests efficient with minimal tabs.\n"
+        "- First action: call doc_orient_and_extract using the EXACT topic string. If the topic mentions Java/Javadoc/Spigot/Bukkit/Paper, pass language='java'.\n"
         "- Sources to prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
         "- Heuristics to detect doc sites: look for navigation like 'Packages/Classes/Index' (Java), breadcrumbs, API signature blocks, and site domains above.\n"
         "- If the topic appears Java-related (mentions class/package/interface, or 'javadoc'): try javadoc.io or Oracle Java SE API index; otherwise perform a targeted doc search.\n"
