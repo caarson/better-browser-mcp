@@ -126,6 +126,153 @@ class CustomController(Controller):
             )
 
         @self.registry.action(
+            "Click the top documentation-site result on the current search page."
+        )
+        async def click_best_doc_result(
+            browser: BrowserContext,
+            allowed_sites: list[str] | None = None,
+            include_github: bool = True,
+            prefer_official: bool = True,
+            new_tab: bool = False,
+        ):
+            """
+            Heuristically select the best documentation result link from the current search results page and open it.
+            Default domains include: docs.oracle.com, javadoc.io, developer.mozilla.org, docs.python.org, docs.rs,
+            pkg.go.dev, nodejs.org/api, learn.microsoft.com (dotnet api), developer.apple.com/documentation,
+            kotlinlang.org/docs or /api, readthedocs.io, dev.java, docs.gradle.org, docs.spring.io.
+            GitHub is allowed (README/Wiki often serve as docs) when include_github=True.
+            """
+            try:
+                pw_ctx = getattr(browser, 'playwright_context', None)
+                if not pw_ctx:
+                    return ActionResult(error="Playwright context missing")
+                pages = getattr(pw_ctx, 'pages', None) or []
+                if not pages:
+                    return ActionResult(error="No open pages")
+                page = pages[-1]
+
+                default_allowed = {
+                    "docs.oracle.com",
+                    "javadoc.io",
+                    "developer.mozilla.org",
+                    "docs.python.org",
+                    "docs.rs",
+                    "doc.rust-lang.org",
+                    "pkg.go.dev",
+                    "nodejs.org",
+                    "learn.microsoft.com",
+                    "developer.apple.com",
+                    "kotlinlang.org",
+                    "readthedocs.io",
+                    "dev.java",
+                    "docs.gradle.org",
+                    "docs.spring.io",
+                }
+                if allowed_sites:
+                    for s in allowed_sites:
+                        if s and isinstance(s, str):
+                            default_allowed.add(s.strip().lower())
+
+                def _domain_score(host: str, path: str) -> int:
+                    host_l = (host or "").lower()
+                    path_l = (path or "").lower()
+                    score = 0
+                    # Official docs priority
+                    if any(dom in host_l for dom in default_allowed):
+                        score += 10
+                    # API/doc path hints
+                    if any(seg in path_l for seg in ["/api", "/docs", "/javadoc", "/reference", "/documentation"]):
+                        score += 4
+                    # Node API special-case
+                    if host_l.endswith("nodejs.org") and "/api" in path_l:
+                        score += 6
+                    # .NET API
+                    if "learn.microsoft.com" in host_l and "/dotnet/" in path_l:
+                        score += 6
+                    return score
+
+                def _github_score(host: str, path: str) -> int:
+                    host_l = (host or "").lower()
+                    path_l = (path or "").lower()
+                    if host_l == "github.com":
+                        # README/Wiki/docs folders commonly used as docs
+                        s = 3
+                        if any(seg in path_l for seg in ["/tree/", "/blob/", "/wiki", "/docs", "/readme"]):
+                            s += 2
+                        return s
+                    return 0
+
+                anchors = await page.query_selector_all('a[href]')
+                from urllib.parse import urlparse, parse_qs
+                candidates: list[tuple[int, str]] = []  # (score, url)
+
+                for a in anchors:
+                    href = await a.get_attribute('href')
+                    if not href:
+                        continue
+                    href = href.strip()
+                    if href.startswith('#') or href.lower().startswith('javascript:'):
+                        continue
+                    # Resolve relative URLs
+                    try:
+                        abs_url = await page.evaluate('(h) => new URL(h, window.location.href).href', href)
+                    except Exception:
+                        abs_url = href
+
+                    try:
+                        parsed = urlparse(abs_url)
+                        host = (parsed.netloc or '').lower()
+                        path = parsed.path or ''
+                    except Exception:
+                        continue
+
+                    # Extract target from Google redirect links
+                    if 'google.' in host and parsed.path.startswith('/url'):
+                        qs = parse_qs(parsed.query or '')
+                        q_vals = qs.get('q') or []
+                        if q_vals:
+                            abs_url = q_vals[0]
+                            try:
+                                parsed = urlparse(abs_url)
+                                host = (parsed.netloc or '').lower()
+                                path = parsed.path or ''
+                            except Exception:
+                                continue
+
+                    # Skip non-target navigations and keep only doc-leaning links
+                    doc_score = _domain_score(host, path)
+                    gh_score = _github_score(host, path) if include_github else 0
+                    total = doc_score + gh_score
+                    if total <= 0:
+                        continue
+
+                    # Optional prefer_official: boost official non-GitHub over GitHub
+                    if prefer_official and host != 'github.com' and doc_score >= 10:
+                        total += 2
+
+                    candidates.append((total, abs_url))
+
+                if not candidates:
+                    return ActionResult(error="No documentation-like links found on this page.")
+
+                # Sort by score desc; keep order otherwise stable
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                chosen_url = candidates[0][1]
+
+                # Navigate via existing go_to_url action to keep consistency
+                return await self.registry.execute_action(
+                    "go_to_url",
+                    {"url": chosen_url, "new_tab": bool(new_tab)},
+                    browser=browser,
+                    page_extraction_llm=None,
+                    sensitive_data=None,
+                    available_file_paths=None,
+                    context=None,
+                )
+            except Exception as e:
+                return ActionResult(error=f"click_best_doc_result failed: {e}")
+
+        @self.registry.action(
             "Open the Java SE API index on docs.oracle.com for quick class browsing."
         )
         async def open_java_api_index(browser: BrowserContext, version: str | None = None, new_tab: bool = False):

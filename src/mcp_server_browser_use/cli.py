@@ -217,7 +217,7 @@ async def _run_documentation_logic_cli(topic_str: str, current_settings: AppSett
         "- Sources to prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
         "- Heuristics to detect doc sites: look for navigation like 'Packages/Classes/Index' (Java), breadcrumbs, API signature blocks, and site domains above.\n"
         "- If the topic appears Java-related (mentions class/package/interface, or 'javadoc'): try javadoc.io or Oracle Java SE API index; otherwise perform a targeted doc search.\n"
-        "- Use documentation actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
+        "- Use documentation actions when appropriate: doc_search, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
         "- On search pages showing 'Showing results for' with 'Search instead for <literal>', click the exact-match link.\n"
         "- Keep a single window with minimal tabs. Avoid logins or account changes.\n"
         "- Before reading a specific page, get a quick orientation: what the page covers and which sections matter for the task.\n"

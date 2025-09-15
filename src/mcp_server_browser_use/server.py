@@ -509,7 +509,7 @@ def serve() -> FastMCP:
                 "- Prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
                 "- Doc-site detection heuristics: look for 'Packages/Classes/Index' (Java), API signature blocks, breadcrumbs, and the domains above.\n"
                 "- If Java-related (mentions class/package/interface or 'javadoc'): try javadoc.io search or the Oracle Java SE API index; otherwise run a targeted doc search.\n"
-                "- Use doc actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
+                "- Use doc actions when appropriate: doc_search, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
                 "- On search result pages that say 'Showing results for' and offer 'Search instead for <literal>', click the exact-match link.\n"
                 "- Keep a single window; open at most one extra tab for search when needed, then return to the main doc tab. Avoid logins or account changes.\n"
                 "- Before diving into a specific page, orient: what the page covers, and which sections matter for the task.\n"
