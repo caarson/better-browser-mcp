@@ -1,10 +1,4 @@
-<img src="./assets/header.png" alt="Better MCP Browser-Use" width="full"/>
-
-<br/>
-
-# Better-MCP-Browser-Use
-
-<img src="./assets/better-browser-mcp-banner.png" alt="Better MCP Browser-Use banner" width="100%" />
+# **Better-MCP-Browser-Use**<img src="./assets/better-browser-mcp-banner.png" alt="Better MCP Browser-Use banner" width="100%" />
 
 ## Abstract and Explanation
 
