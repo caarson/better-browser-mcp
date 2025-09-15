@@ -32,21 +32,23 @@ Everything you expect from the original—plus pragmatic upgrades:
 
 # Better MCP Browser-Use
 
-Lightweight MCP server for practical browser automation and web research. Single-window, tabs-only concurrency. Smarter search control. Documentation-first mode.
+## Abstract and Explanation
+Practical MCP server for browser automation and web research. Single-window with tabs-only concurrency, smart search control, and a documentation-first mode that extracts headings, API symbols, anchors, and code from official docs.
 
-— Fork of https://github.com/Saik0s/mcp-browser-use with focused UX and config improvements.
+## Improvements and Effectivity Upgrades
+- Tabs-only concurrency with one window (cleaner UX, fewer surprises)
+- Unified tool `run_research` with modes: `auto | task | research | documentation | deep_research`
+- Search control: choose engine (`bing|ddg|brave|google|custom`) and optionally block Google
+- Documentation profiles (auto-detected): MDN, Python/Sphinx, ReadTheDocs, Rust, Go pkg, Node.js API, .NET API, Java (Oracle/Javadoc), Apple Docs
 
-## Quick start
-
-1) Install Playwright browsers (one-time):
-
+## Setup & Use Instructions
+1) Install Playwright (one-time):
 ```powershell
 $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "uvx" };
 & $uvx --from git+https://github.com/caarson/mcp-browser-use@main python -m playwright install
 ```
 
 2) Run the server:
-
 ```powershell
 $env:MCP_SERVER_LOGGING_LEVEL = "INFO"
 $env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"
@@ -54,8 +56,7 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
 & $uvx --from git+https://github.com/caarson/mcp-browser-use@main mcp-server-browser-use
 ```
 
-3) Minimal MCP client config (example):
-
+3) Minimal MCP client config:
 ```json
 {
   "mcpServers": {
@@ -73,88 +74,40 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
 }
 ```
 
-## Tools (MCP)
+4) Tools at a glance:
+- `run_research(topic_or_task, mode=auto|task|research|documentation|deep_research, max_windows?)`
+- `run_documentation(topic_or_task)`
+- `run_auto(topic_or_task)`
+- `run_task(task)`
+- `run_deep_research(research_task, max_windows?)`
 
-- `run_research(topic_or_task, mode=auto|task|research|documentation|deep_research, max_windows?)` — unified entrypoint.
-- `run_documentation(topic_or_task)` — documentation-focused convenience.
-- `run_auto(topic_or_task)` — equivalent to `run_research(..., mode=auto)`.
-- `run_task(task)` — router favoring light tasks.
-- `run_deep_research(research_task, max_windows?)` — heavy pipeline.
+Parameters (env vars) — summarize only the most useful:
+- LLM (`MCP_LLM_*`): `PROVIDER`, `MODEL_NAME`, `TEMPERATURE`, `API_KEY`/provider keys; endpoints optional; planner optional
+- Browser (`MCP_BROWSER_*`): `HEADLESS`, `KEEP_OPEN`, `USER_DATA_DIR`, `BINARY_PATH`, `WINDOW_WIDTH`, `WINDOW_HEIGHT`, `USE_OWN_BROWSER`, `CDP_URL`
+- Agent (`MCP_AGENT_TOOL_*`): `MAX_STEPS`, `MAX_ACTIONS_PER_STEP`, `USE_VISION`, recording/history paths
+- Research (`MCP_RESEARCH_TOOL_*`): `SAVE_DIR`, `MAX_WINDOWS` (or `MAX_PARALLEL_BROWSERS`)
+- Paths (`MCP_PATHS_*`): `DOWNLOADS`
+- Server (`MCP_SERVER_*`): `LOGGING_LEVEL`, `LOG_FILE`, `MCP_CONFIG` (JSON)
+- Search: `MCP_SEARCH_ENGINE`, `MCP_BLOCK_GOOGLE`, `MCP_SEARCH_URL_TEMPLATE` or `MCP_SEARCH_ENGINE_URL` + `MCP_SEARCH_QUERY_PARAM`
 
-Tip: Prefer `run_research` and set `mode` per need. Use `documentation` for official docs/API summaries with anchors and code.
-
-## Configuration (env vars)
-
-Set via .env or your MCP client’s `env` block. Key groups:
-
-- LLM (`MCP_LLM_`)
-  - `PROVIDER` (google|openai|anthropic|azure_openai|mistral|openrouter|ollama|…)
-  - `MODEL_NAME`, `TEMPERATURE`, `BASE_URL`, `API_KEY`
-  - Provider keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `AZURE_OPENAI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, etc.
-  - Endpoints: `OPENAI_ENDPOINT`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `OLLAMA_ENDPOINT`, `OPENROUTER_ENDPOINT`, …
-  - Planner (optional): `PLANNER_PROVIDER`, `PLANNER_MODEL_NAME`, `PLANNER_TEMPERATURE`, `PLANNER_BASE_URL`, `PLANNER_API_KEY`
-
-- Browser (`MCP_BROWSER_`)
-  - `HEADLESS`, `DISABLE_SECURITY`, `BINARY_PATH`, `USER_DATA_DIR`, `WINDOW_WIDTH`, `WINDOW_HEIGHT`
-  - CDP reuse: `USE_OWN_BROWSER`, `CDP_URL`, `WSS_URL`
-  - Lifecycle/trace: `KEEP_OPEN`, `TRACE_PATH`
-
-- Agent tool (`MCP_AGENT_TOOL_`)
-  - `MAX_STEPS`, `MAX_ACTIONS_PER_STEP`, `TOOL_CALLING_METHOD`, `MAX_INPUT_TOKENS`, `USE_VISION`
-  - Overrides: `HEADLESS`, `DISABLE_SECURITY`
-  - Recording/history: `ENABLE_RECORDING`, `SAVE_RECORDING_PATH`, `HISTORY_PATH`
-
-- Research (`MCP_RESEARCH_TOOL_`)
-  - `SAVE_DIR` (base folder for outputs)
-  - Concurrency cap: `MAX_WINDOWS` (preferred), or legacy `MAX_PARALLEL_BROWSERS`
-
-- Paths (`MCP_PATHS_`)
-  - `DOWNLOADS`
-
-- Server (`MCP_SERVER_`)
-  - `LOGGING_LEVEL` (DEBUG|INFO|WARNING|ERROR), `LOG_FILE`, `ANONYMIZED_TELEMETRY`
-  - `MCP_CONFIG` (JSON) to expose additional MCP tools inside the browser agent
-
-- Search control (standalone)
-  - `MCP_SEARCH_ENGINE` (bing|ddg|brave|google|custom)
-  - `MCP_BLOCK_GOOGLE` (true|false)
-  - For `custom`: `MCP_SEARCH_URL_TEMPLATE` or `MCP_SEARCH_ENGINE_URL` + `MCP_SEARCH_QUERY_PARAM`
-
-## Sample .env
-
+Sample .env
 ```dotenv
-# LLM
 MCP_LLM_PROVIDER=google
 MCP_LLM_GOOGLE_API_KEY=YOUR_KEY
 MCP_LLM_MODEL_NAME=gemini-2.5-flash-preview-04-17
-MCP_LLM_TEMPERATURE=0.0
-
-# Browser
 MCP_BROWSER_HEADLESS=true
-MCP_BROWSER_KEEP_OPEN=true
-
-# Research
 MCP_RESEARCH_TOOL_SAVE_DIR=./research-out
-MCP_RESEARCH_TOOL_MAX_WINDOWS=1
-
-# Search
 MCP_SEARCH_ENGINE=bing
-MCP_BLOCK_GOOGLE=false
-
-# Server
 MCP_SERVER_LOGGING_LEVEL=INFO
 ```
 
 ## Troubleshooting
+- Exit Code 1: ensure Playwright is installed, set a valid `MCP_RESEARCH_TOOL_SAVE_DIR`, then set `MCP_SERVER_LOGGING_LEVEL=DEBUG` and re-run to capture logs.
+- Page opens but blank tab persists: tabs model auto-closes `about:blank`; ensure you’re on latest main.
 
-- Exit Code 1 starting the server:
-  - Ensure Playwright browsers installed (see Quick start step 1).
-  - Set a valid `MCP_RESEARCH_TOOL_SAVE_DIR`.
-  - Temporarily set `MCP_SERVER_LOGGING_LEVEL=DEBUG` and re-run to capture logs.
-
-## License
-
-MIT — see LICENSE.
+## Credits
+- Original project: https://github.com/Saik0s/mcp-browser-use
+- This fork: https://github.com/caarson/mcp-browser-use
 
 <p align="center">
   <img src="./assets/better-browser-mcp-logo.png" alt="logo" width="120" />
