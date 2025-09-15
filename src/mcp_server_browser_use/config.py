@@ -92,31 +92,10 @@ class DeepResearchToolSettings(BaseSettings):
     save_dir: Optional[str] = Field(default=None, env="SAVE_DIR") # Base dir, task_id will be appended. Optional now.
 
     @property
-    def max_tabs(self) -> int:
-        """
-        Preferred tabs-oriented cap. Reads MCP_RESEARCH_TOOL_MAX_TABS if set; otherwise
-        falls back to MCP_RESEARCH_TOOL_MAX_WINDOWS, then legacy max_parallel_browsers.
-        """
-        v = os.getenv("MCP_RESEARCH_TOOL_MAX_TABS")
-        if v is not None:
-            try:
-                return int(v)
-            except Exception:
-                pass
-        # Fallback to windows-oriented env if present
-        w = os.getenv("MCP_RESEARCH_TOOL_MAX_WINDOWS")
-        if w is not None:
-            try:
-                return int(w)
-            except Exception:
-                pass
-        return self.max_parallel_browsers
-
-    @property
     def max_windows(self) -> int:
         """
-        Deprecated: prefer max_tabs. Reads MCP_RESEARCH_TOOL_MAX_WINDOWS if set; otherwise
-        falls back to max_tabs/legacy value.
+        Preferred windows-oriented cap. Reads MCP_RESEARCH_TOOL_MAX_WINDOWS if set; otherwise
+        falls back to the legacy max_parallel_browsers value.
         """
         v = os.getenv("MCP_RESEARCH_TOOL_MAX_WINDOWS")
         if v is not None:
@@ -124,7 +103,7 @@ class DeepResearchToolSettings(BaseSettings):
                 return int(v)
             except Exception:
                 pass
-        return self.max_tabs
+        return self.max_parallel_browsers
 
 
 class PathSettings(BaseSettings):

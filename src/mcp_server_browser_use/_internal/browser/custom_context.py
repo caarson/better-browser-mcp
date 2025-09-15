@@ -113,4 +113,19 @@ class CustomBrowserContext(BrowserContext):
             """
         )
 
+        # Ensure we don't keep an unused initial about:blank tab around.
+        # Some browser setups (e.g., CDP or certain launches) can have a default blank page.
+        try:
+            for p in list(context.pages):
+                url = getattr(p, 'url', '') or ''
+                if url == 'about:blank':
+                    try:
+                        await p.close()
+                    except Exception:
+                        # Non-fatal; continue cleanup best-effort
+                        pass
+        except Exception:
+            # If fetching pages fails for any reason, don't block context creation
+            pass
+
         return context

@@ -38,8 +38,8 @@ from browser_use.browser.browser import BrowserConfig
 from mcp.server.fastmcp import Context, FastMCP
 
 # Import from _internal
-from ._internal.agent.task_agent import TaskAgent
-from ._internal.agent.research_agent import ResearchAgent
+from ._internal.agent.browser_use.browser_use_agent import BrowserUseAgent
+from ._internal.agent.deep_research.deep_research_agent import DeepResearchAgent
 from ._internal.browser.custom_browser import CustomBrowser
 from ._internal.browser.custom_context import (
     CustomBrowserContext,
@@ -130,6 +130,18 @@ async def get_browser_and_context() -> tuple[CustomBrowser, CustomBrowserContext
                 # For simplicity, let's reuse the context if keep_open is true.
                 # If new context per call is needed, this logic would change.
                 current_context = shared_context_instance
+
+                # Clean up any leftover initial blank page to avoid unused tabs.
+                try:
+                    for p in list(current_context.playwright_context.pages):
+                        url = getattr(p, 'url', '') or ''
+                        if url == 'about:blank':
+                            try:
+                                await p.close()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
         if not current_browser or not current_context : # If shared instances were not valid or not yet created
             logger.info("Creating new shared browser and context.")
@@ -225,7 +237,7 @@ def serve() -> FastMCP:
                 agent_history_json_file = str(task_specific_history_dir / f"{agent_task_id}.json")
                 logger.info(f"Agent history will be saved to: {agent_history_json_file}")
 
-            agent_instance = TaskAgent(
+            agent_instance = BrowserUseAgent(
                 task=task,
                 llm=main_llm,
                 browser=browser_instance,
@@ -265,8 +277,7 @@ def serve() -> FastMCP:
     async def run_deep_research(
         ctx: Context,
         research_task: str,
-        max_tabs: Optional[int] = None,
-        max_windows: Optional[int] = None,  # deprecated alias
+        max_windows: Optional[int] = None,
     ) -> str:
         logger.info(f"Received run_deep_research task: {research_task[:100]}...")
         task_id = str(uuid.uuid4()) # This task_id is used for the sub-directory name
@@ -298,18 +309,13 @@ def serve() -> FastMCP:
                 if isinstance(settings.server.mcp_config, str):
                      mcp_server_config_for_agent = json.loads(settings.server.mcp_config)
 
-            agent_instance = ResearchAgent(
+            agent_instance = DeepResearchAgent(
                 llm=research_llm,
                 browser_config=dr_browser_cfg,
                 mcp_server_config=mcp_server_config_for_agent,
             )
 
-            # Backward compatible selection: prefer explicit max_tabs, then legacy max_windows param, then settings
-            current_max_tabs = (
-                max_tabs if max_tabs is not None else (
-                    max_windows if max_windows is not None else settings.research_tool.max_tabs
-                )
-            )
+            current_max_parallel_browsers = max_windows if max_windows is not None else settings.research_tool.max_windows
 
             # Check if save_dir is provided, otherwise use in-memory approach
             save_dir_for_this_task = None
@@ -320,13 +326,13 @@ def serve() -> FastMCP:
             else:
                 logger.info("No save_dir configured. Deep research will operate in memory-only mode.")
 
-            logger.info(f"Using max_tabs: {current_max_tabs}")
+            logger.info(f"Using max_windows: {current_max_parallel_browsers}")
 
             result_dict = await agent_instance.run(
                 topic=research_task,
                 save_dir=save_dir_for_this_task, # Can be None now
                 task_id=task_id, # Pass the generated task_id
-                max_tabs=current_max_tabs
+                max_windows=current_max_parallel_browsers
             )
 
             # Handle the result based on if files were saved or not
@@ -355,8 +361,7 @@ def serve() -> FastMCP:
     async def run_task(
         ctx: Context,
         task: str,
-        max_tabs: Optional[int] = None,
-        max_windows: Optional[int] = None,  # deprecated alias
+        max_windows: Optional[int] = None,
     ) -> str:
         """
         Smart router that prefers the lightweight browser task and escalates to deep research only when needed.
@@ -393,12 +398,12 @@ def serve() -> FastMCP:
         if mode == "always-task":
             return await run_browser_agent(ctx, task)  # type: ignore
         if mode == "always-research":
-            return await run_deep_research(ctx, task, max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
+            return await run_deep_research(ctx, task, max_windows)  # type: ignore
 
         # auto mode
         if needs_deep_research(task):
             logger.info("Router: escalating to deep research based on heuristic.")
-            return await run_deep_research(ctx, task, max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
+            return await run_deep_research(ctx, task, max_windows)  # type: ignore
         else:
             logger.info("Router: using lightweight task (browser agent).")
             return await run_browser_agent(ctx, task)  # type: ignore
@@ -407,18 +412,18 @@ def serve() -> FastMCP:
     async def run_research(
         ctx: Context,
         topic_or_task: str,
-        mode: Literal["auto", "task", "research", "deep_research"] = "auto",
-        max_tabs: Optional[int] = None,
-        max_windows: Optional[int] = None,  # deprecated alias
+        mode: Literal["auto", "task", "research", "documentation", "deep_research"] = "auto",
+        max_windows: Optional[int] = None,
     ) -> str:
         """
-        Unified entry point for browser work with modes:
-        - auto (default): choose between task, research (lightweight), and deep_research
-        - task: concrete UI/browser actions (e.g., Cloudflare DNS, consoles)
-        - research: lightweight research/summarization using a single browser agent
-        - deep_research: full deep research pipeline
+    Unified entry point for browser work with modes:
+    - auto (default): choose between task, research (lightweight), documentation, and deep_research
+    - task: concrete UI/browser actions (e.g., Cloudflare DNS, consoles)
+    - research: lightweight research/summarization using a single browser agent
+    - documentation: documentation-first navigation and summarization (prefers official docs, API refs)
+    - deep_research: full deep research pipeline
 
-        Env override: MCP_RESEARCH_MODE=auto|task|research|deep_research
+    Env override: MCP_RESEARCH_MODE=auto|task|research|documentation|deep_research
         """
         env_mode = os.getenv("MCP_RESEARCH_MODE", "auto").lower()
         # If caller explicitly picks a mode, honor it; if left at default 'auto', allow env to set default mode
@@ -457,13 +462,25 @@ def serve() -> FastMCP:
             ]
             return any(p in s for p in research_markers)
 
+        def looks_like_documentation(t: str) -> bool:
+            s = t.lower()
+            doc_markers = [
+                "api reference", "reference docs", "javadoc", "java doc", "oracle docs", "javadoc.io",
+                "class ", "method ", "package ", "interface ", "mdn", "python docs", "pypi docs",
+                "read the docs", "rtd", "godoc", "pkg.go.dev", "rust docs", "docs.rs", "nuget docs",
+                "dotnet api", "typescript api", "js api", "kotlin docs", "swift docs", "objc docs",
+            ]
+            return any(p in s for p in doc_markers)
+
         # Honor explicit modes first
-        if effective_mode in {"task", "research", "deep_research"}:
+        if effective_mode in {"task", "research", "documentation", "deep_research"}:
             chosen_mode = effective_mode
         else:
             # auto routing
             if needs_deep_research(text):
                 chosen_mode = "deep_research"
+            elif looks_like_documentation(text):
+                chosen_mode = "documentation"
             elif looks_like_task(text):
                 chosen_mode = "task"
             elif looks_like_research(text):
@@ -475,13 +492,24 @@ def serve() -> FastMCP:
         logger.info(f"run_research routing to: {chosen_mode}")
 
         if chosen_mode == "deep_research":
-            return await run_deep_research(ctx, text, max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
+            return await run_deep_research(ctx, text, max_windows)  # type: ignore
 
         # Lightweight path uses run_browser_agent with a small, mode-specific prefix
         if chosen_mode == "task":
             prefix = (
                 "Mode: TASK. Perform the concrete browser actions requested (navigation, forms, toggles, settings). "
                 "Favor a single window/tab; act directly and stop when the task is done.\n\n"
+            )
+        elif chosen_mode == "documentation":
+            prefix = (
+                "Mode: DOCUMENTATION. Your goal is to find and read the most relevant official documentation or API references, "
+                "then provide a concise, accurate summary with links and any critical code snippets.\n"
+                "- Prefer official sources (e.g., oracle.com docs, javadoc.io, developer.mozilla.org, docs.python.org, docs.rs).\n"
+                "- Use documentation-oriented actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, "
+                "extract_main_content, fetch_java_doc_sections.\n"
+                "- On search result pages that say 'Showing results for' with a 'Search instead for <literal>' link, click the exact-match link.\n"
+                "- Keep a single window with minimal tabs. Avoid logins, avoid changing account settings.\n"
+                "- When summarizing, include: page title, 1-3 key points, API signatures, and direct links (anchors) to sections.\n\n"
             )
         else:  # research
             prefix = (
@@ -495,14 +523,24 @@ def serve() -> FastMCP:
     async def run_auto(
         ctx: Context,
         topic_or_task: str,
-        max_tabs: Optional[int] = None,
-        max_windows: Optional[int] = None,  # deprecated alias
+        max_windows: Optional[int] = None,
     ) -> str:
         """
         Auto-select between task, research, and deep_research based on heuristics.
         This is equivalent to calling run_research(..., mode="auto").
         """
-        return await run_research(ctx, topic_or_task, mode="auto", max_tabs=max_tabs, max_windows=max_windows)  # type: ignore
+        return await run_research(ctx, topic_or_task, mode="auto", max_windows=max_windows)  # type: ignore
+
+    @server.tool()
+    async def run_documentation(
+        ctx: Context,
+        topic_or_task: str,
+    ) -> str:
+        """
+        Documentation-focused browsing: prefers official docs and API references and summarizes clearly.
+        Equivalent to run_research(..., mode="documentation").
+        """
+        return await run_research(ctx, topic_or_task, mode="documentation")  # type: ignore
 
     return server
 
@@ -523,10 +561,11 @@ def main():
             "Usage: mcp-server-browser-use [--help] [--version]\n\n"
             "Starts the MCP server on stdio. Configure via environment variables.\n\n"
             "Exposed MCP tools:\n"
-            "  - run_auto(topic_or_task, max_tabs?)\n"
-            "  - run_research(topic_or_task, mode=auto|task|research|deep_research, max_tabs?)\n"
-            "  - run_task(task, max_tabs?)\n"
-            "  - run_deep_research(research_task, max_tabs?)\n"
+            "  - run_auto(topic_or_task, max_windows?)\n"
+            "  - run_research(topic_or_task, mode=auto|task|research|documentation|deep_research, max_windows?)\n"
+            "  - run_task(task, max_windows?)\n"
+            "  - run_deep_research(research_task, max_windows?)\n"
+            "  - run_documentation(topic_or_task)\n"
         )
         print(usage)
         return

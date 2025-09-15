@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 
 from .config import AppSettings, settings as global_settings # Import AppSettings and the global instance
 # Import from _internal
-from ._internal.agent.task_agent import TaskAgent
-from ._internal.agent.research_agent import ResearchAgent
+from ._internal.agent.browser_use.browser_use_agent import BrowserUseAgent
+from ._internal.agent.deep_research.deep_research_agent import DeepResearchAgent
 from ._internal.browser.custom_browser import CustomBrowser
 from ._internal.browser.custom_context import (
     CustomBrowserContext,
@@ -183,7 +183,7 @@ async def _run_browser_agent_logic_cli(task_str: str, current_settings: AppSetti
             logger.info(f"Agent history will be saved to: {agent_history_json_file}")
 
         # Agent Instantiation
-        agent_instance = TaskAgent(
+        agent_instance = BrowserUseAgent(
             task=task_str, llm=main_llm,
             browser=browser_instance, browser_context=context_instance, controller=controller_instance,
             planner_llm=planner_llm,
@@ -209,7 +209,22 @@ async def _run_browser_agent_logic_cli(task_str: str, current_settings: AppSetti
     return final_result
 
 
-async def _run_deep_research_logic_cli(research_task_str: str, max_tabs_override: Optional[int], current_settings: AppSettings) -> str:
+async def _run_documentation_logic_cli(topic_str: str, current_settings: AppSettings) -> str:
+    """Run a documentation-focused task using the BrowserUseAgent with a tailored prefix."""
+    doc_prefix = (
+        "Mode: DOCUMENTATION. Your goal is to find and read the most relevant official documentation or API references, "
+        "then provide a concise, accurate summary with links and any critical code snippets.\n"
+        "- Prefer official sources (e.g., oracle.com docs, javadoc.io, developer.mozilla.org, docs.python.org, docs.rs).\n"
+        "- Use documentation-oriented actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, "
+        "extract_main_content, fetch_java_doc_sections.\n"
+        "- On search result pages that say 'Showing results for' with a 'Search instead for <literal>' link, click the exact-match link.\n"
+        "- Keep a single window with minimal tabs. Avoid logins, avoid changing account settings.\n"
+        "- When summarizing, include: page title, 1-3 key points, API signatures, and direct links (anchors) to sections.\n\n"
+    )
+    return await _run_browser_agent_logic_cli(f"{doc_prefix}{topic_str}", current_settings)
+
+
+async def _run_deep_research_logic_cli(research_task_str: str, max_windows_override: Optional[int], current_settings: AppSettings) -> str:
     logger.info(f"CLI: Starting run_deep_research task: {research_task_str[:100]}...")
     task_id = str(uuid.uuid4())
     report_content = "Error: Deep research failed."
@@ -236,25 +251,25 @@ async def _run_deep_research_logic_cli(research_task_str: str, max_tabs_override
         if current_settings.server.mcp_config:
             mcp_server_config_for_agent = current_settings.server.mcp_config
             if isinstance(current_settings.server.mcp_config, str):
-                mcp_server_config_for_agent = json.loads(current_settings.server.mcp_config)
+                 mcp_server_config_for_agent = json.loads(current_settings.server.mcp_config)
 
-        agent_instance = ResearchAgent(
+        agent_instance = DeepResearchAgent(
             llm=research_llm, browser_config=dr_browser_cfg,
             mcp_server_config=mcp_server_config_for_agent,
         )
 
-        current_max_tabs = max_tabs_override if max_tabs_override is not None else current_settings.research_tool.max_tabs
+        current_max_parallel_browsers = max_windows_override if max_windows_override is not None else current_settings.research_tool.max_windows
 
         save_dir_for_task: Optional[str] = None
         if current_settings.research_tool.save_dir:
             save_dir_for_task = os.path.join(current_settings.research_tool.save_dir, task_id)
             os.makedirs(save_dir_for_task, exist_ok=True)
             logger.info(f"CLI Deep research save directory: {save_dir_for_task}")
-        logger.info(f"CLI Using max_tabs: {current_max_tabs}")
+        logger.info(f"CLI Using max_windows: {current_max_parallel_browsers}")
 
         result_dict = await agent_instance.run(
             topic=research_task_str, task_id=task_id,
-            save_dir=save_dir_for_task, max_tabs=current_max_tabs
+            save_dir=save_dir_for_task, max_windows=current_max_parallel_browsers
         )
 
         report_file_path = result_dict.get("report_file_path")
@@ -296,15 +311,13 @@ def run_browser_agent(
 @app.command()
 def run_deep_research(
     research_task: str = typer.Argument(..., help="The topic or question for deep research."),
-    max_tabs: Optional[int] = typer.Option(
+    max_windows: Optional[int] = typer.Option(
         None,
-        "--max-tabs",
-        "-t",
+        "--max-windows",
+        "-w",
         "--max-parallel-browsers",  # deprecated alias
         "-p",  # deprecated alias
-        "--max-windows",  # deprecated alias
-        "-w",  # deprecated alias
-        help="Override max tabs (applies to deep research). Backward-compatible aliases: --max-windows/-w and --max-parallel-browsers/-p (deprecated)",
+        help="Override max windows from settings (applies to deep research). Alias: --max-parallel-browsers/-p (deprecated)",
     )
 ):
     """Performs deep web research and prints the report."""
@@ -314,12 +327,31 @@ def run_deep_research(
 
     typer.secho(f"Executing deep research task: {research_task}", fg=typer.colors.GREEN)
     try:
-        result = asyncio.run(_run_deep_research_logic_cli(research_task, max_tabs, cli_state.settings))
+        result = asyncio.run(_run_deep_research_logic_cli(research_task, max_windows, cli_state.settings))
         typer.secho("\n--- Deep Research Final Report ---", fg=typer.colors.BLUE, bold=True)
         print(result)
     except Exception as e:
         typer.secho(f"CLI command failed: {e}", fg=typer.colors.RED)
         logger.error(f"CLI run_deep_research command failed: {e}\n{traceback.format_exc()}")
+        raise typer.Exit(code=1)
+
+@app.command()
+def run_documentation(
+    topic: str = typer.Argument(..., help="Documentation-focused navigation and summarization task."),
+):
+    """Prefers official docs and API references; summarizes clearly with links and key signatures."""
+    if not cli_state.settings:
+        typer.secho("Error: Application settings not loaded. Use --env-file or set environment variables.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    typer.secho(f"Executing documentation task: {topic}", fg=typer.colors.GREEN)
+    try:
+        result = asyncio.run(_run_documentation_logic_cli(topic, cli_state.settings))
+        typer.secho("\n--- Documentation Summary ---", fg=typer.colors.BLUE, bold=True)
+        print(result)
+    except Exception as e:
+        typer.secho(f"CLI command failed: {e}", fg=typer.colors.RED)
+        logger.error(f"CLI run_documentation command failed: {e}\n{traceback.format_exc()}")
         raise typer.Exit(code=1)
 
 if __name__ == "__main__":

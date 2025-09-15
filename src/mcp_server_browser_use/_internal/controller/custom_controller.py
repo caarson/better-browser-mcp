@@ -1,4 +1,5 @@
 import pdb
+import json
 
 import pyperclip
 from typing import Optional, Type, Callable, Dict, Any, Union, Awaitable, TypeVar
@@ -72,6 +73,222 @@ class CustomController(Controller):
                                     include_in_memory=True)
 
         @self.registry.action(
+            "Search documentation using site filters and open the results page."
+        )
+        async def doc_search(query: str, browser: BrowserContext, language: str | None = None, site: str | None = None, new_tab: bool = False):
+            """
+            Perform a documentation-focused search by applying site filters for official docs portals.
+            Examples:
+            - language="java" -> restrict to docs.oracle.com and javadoc.io
+            - site="docs.oracle.com" -> restrict to that site only
+            """
+            q = query.strip()
+            if not q:
+                return ActionResult(error="Empty query for doc_search")
+
+            filters = []
+            if site:
+                filters.append(f"site:{site}")
+            elif language and language.lower() == "java":
+                filters.append("(site:docs.oracle.com OR site:javadoc.io)")
+
+            filtered_query = f"{q} {' '.join(filters)}" if filters else q
+            url = get_search_url(filtered_query)
+            logger.info(f"doc_search -> {filtered_query} => {url}")
+            # Reuse existing go_to_url machinery so URL rewriting hooks still apply
+            return await self.registry.execute_action(
+                "go_to_url",
+                {"url": url, "new_tab": bool(new_tab)},
+                browser=browser,
+                page_extraction_llm=None,
+                sensitive_data=None,
+                available_file_paths=None,
+                context=None,
+            )
+
+        @self.registry.action(
+            "Open the Java SE API index on docs.oracle.com for quick class browsing."
+        )
+        async def open_java_api_index(browser: BrowserContext, version: str | None = None, new_tab: bool = False):
+            """
+            Open the official Java SE API index; defaults to a recent version if none provided.
+            """
+            ver = (version or "23").strip()  # default to a recent release
+            # Construct Oracle API index URL
+            base = f"https://docs.oracle.com/en/java/javase/{ver}/docs/api/index.html"
+            logger.info(f"open_java_api_index -> {base}")
+            return await self.registry.execute_action(
+                "go_to_url",
+                {"url": base, "new_tab": bool(new_tab)},
+                browser=browser,
+                page_extraction_llm=None,
+                sensitive_data=None,
+                available_file_paths=None,
+                context=None,
+            )
+
+        @self.registry.action(
+            "Open javadoc.io search for libraries/classes by keyword."
+        )
+        async def open_javadoc_io_search(q: str, browser: BrowserContext, new_tab: bool = False):
+            query = q.strip()
+            if not query:
+                return ActionResult(error="Empty query for open_javadoc_io_search")
+            url = f"https://javadoc.io/search?q={query}"
+            logger.info(f"open_javadoc_io_search -> {url}")
+            return await self.registry.execute_action(
+                "go_to_url",
+                {"url": url, "new_tab": bool(new_tab)},
+                browser=browser,
+                page_extraction_llm=None,
+                sensitive_data=None,
+                available_file_paths=None,
+                context=None,
+            )
+
+        @self.registry.action(
+            "Extract main readable content from the current page (readability-like)."
+        )
+        async def extract_main_content(browser: BrowserContext):
+            """
+            Use the installed MainContentExtractor to pull the primary article/content area from the page.
+            Returns plain text fallback if HTML extract is not available.
+            """
+            try:
+                pw_ctx = getattr(browser, 'playwright_context', None)
+                if not pw_ctx:
+                    return ActionResult(error="Playwright context missing")
+                pages = getattr(pw_ctx, 'pages', None) or []
+                if not pages:
+                    return ActionResult(error="No open pages")
+                page = pages[-1]
+                html = await page.content()
+                extractor = MainContentExtractor()
+                result = extractor.extract(html)
+                text = result.text or ""
+                if not text.strip():
+                    # fallback: try to grab body innerText
+                    try:
+                        txt = await page.inner_text('body')
+                        text = txt or ""
+                    except Exception:
+                        pass
+                return ActionResult(extracted_content=text.strip(), include_in_memory=True)
+            except Exception as e:
+                return ActionResult(error=f"extract_main_content failed: {e}")
+
+        @self.registry.action(
+            "Fetch structured sections from a Java javadoc page (class/method/field summaries)."
+        )
+        async def fetch_java_doc_sections(browser: BrowserContext, max_items: int = 100):
+            """
+            Heuristically extract common sections from Java docs (Oracle or javadoc.io):
+            - headers: title, subtitle (package), page title
+            - summaries: class, method, field, constructor
+            - details sections
+            Returns JSON with keys per section.
+            """
+            try:
+                pw_ctx = getattr(browser, 'playwright_context', None)
+                if not pw_ctx:
+                    return ActionResult(error="Playwright context missing")
+                pages = getattr(pw_ctx, 'pages', None) or []
+                if not pages:
+                    return ActionResult(error="No open pages")
+                page = pages[-1]
+
+                async def _text(sel: str) -> str:
+                    try:
+                        el = await page.query_selector(sel)
+                        if not el:
+                            return ""
+                        return (await el.inner_text()).strip()
+                    except Exception:
+                        return ""
+
+                async def _collect(selectors: list[str]) -> list[dict[str, str]]:
+                    acc: list[dict[str, str]] = []
+                    for sel in selectors:
+                        try:
+                            els = await page.query_selector_all(sel)
+                            for el in els:
+                                if len(acc) >= int(max_items):
+                                    break
+                                try:
+                                    txt = (await el.inner_text()).strip()
+                                    href = await el.get_attribute('href')
+                                    acc.append({"text": txt, **({"href": href} if href else {})})
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+                    return acc
+
+                data: dict[str, object] = {}
+                data["page_title"] = await page.title()
+                data["header_title"] = await _text(".header .title, h1.title, h1")
+                data["header_subtitle"] = await _text(".header .subTitle, .subTitle")
+                data["package"] = await _text(".header .subTitle, .package-signature .packageName")
+                data["class_summary"] = await _collect(["#class-summary", "section.class-description", ".class-description"]) 
+                data["constructor_summary"] = await _collect(["#constructor-summary", "table.constructor-summary, .constructor-summary"]) 
+                data["method_summary"] = await _collect(["#method-summary", "table.method-summary, .method-summary, .memberSummary:has(> caption:has-text('Method Summary')) a"]) 
+                data["field_summary"] = await _collect(["#field-summary", "table.field-summary, .field-summary, .memberSummary:has(> caption:has-text('Field Summary')) a"]) 
+                data["details"] = await _collect(["#method-details, #field-details, #constructor-details, .details"]) 
+
+                return ActionResult(extracted_content=json.dumps(data, ensure_ascii=False), include_in_memory=True)
+            except Exception as e:
+                return ActionResult(error=f"fetch_java_doc_sections failed: {e}")
+
+        @self.registry.action(
+            "Fetch elements from the current page via CSS selectors and return their text or HTML."
+        )
+        async def fetch_elements(selectors: list[str], browser: BrowserContext, max_per_selector: int = 50, include_html: bool = False):
+            """
+            Extract structured content from documentation pages without excessive navigation.
+            Returns a JSON object keyed by selector with ordered items.
+            """
+            try:
+                pw_ctx = getattr(browser, 'playwright_context', None)
+                if not pw_ctx:
+                    return ActionResult(error="Playwright context missing")
+                pages = getattr(pw_ctx, 'pages', None) or []
+                if not pages:
+                    return ActionResult(error="No open pages")
+                page = pages[-1]
+
+                out: dict[str, list[dict[str, str]]] = {}
+                for sel in selectors or []:
+                    try:
+                        locs = await page.query_selector_all(sel)
+                        items = []
+                        for i, el in enumerate(locs):
+                            if i >= int(max_per_selector):
+                                break
+                            try:
+                                if include_html:
+                                    content = await el.inner_html()
+                                else:
+                                    # Prefer innerText to avoid hidden text and scripts
+                                    content = await el.inner_text()
+                                href = None
+                                try:
+                                    href_prop = await el.get_attribute('href')
+                                    href = href_prop if href_prop else None
+                                except Exception:
+                                    pass
+                                items.append({"text": content.strip(), **({"href": href} if href else {})})
+                            except Exception:
+                                continue
+                        out[sel] = items
+                    except Exception:
+                        out[sel] = []
+
+                payload = json.dumps(out, ensure_ascii=False)
+                return ActionResult(extracted_content=payload, include_in_memory=True)
+            except Exception as e:
+                return ActionResult(error=f"fetch_elements failed: {e}")
+
+        @self.registry.action(
             'Upload file to interactive element with file path ',
         )
         async def upload_file(index: int, path: str, browser: BrowserContext, available_file_paths: list[str]):
@@ -117,7 +334,7 @@ class CustomController(Controller):
             sensitive_data: Optional[Dict[str, str]] = None,
             available_file_paths: Optional[list[str]] = None,
             #
-            context: Context | None = None,
+            context: object | None = None,
     ) -> ActionResult:
         """Execute an action"""
 
