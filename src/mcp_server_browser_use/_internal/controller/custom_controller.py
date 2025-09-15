@@ -50,6 +50,53 @@ class CustomController(Controller):
         self.mcp_client = None
         self.mcp_server_config = None
 
+    async def _set_overlay(self, browser: BrowserContext, text: Optional[str]):
+        """Inject or update a tiny overlay in the top-right corner of the active page."""
+        try:
+            pw_ctx = getattr(browser, "playwright_context", None)
+            if not pw_ctx or not getattr(pw_ctx, "pages", None):
+                return
+            page = pw_ctx.pages[-1]
+            await page.evaluate(
+                """
+                (text) => {
+                    try {
+                        let el = document.getElementById('__agent_overlay__');
+                        if (!el) {
+                            el = document.createElement('div');
+                            el.id = '__agent_overlay__';
+                            el.style.cssText = [
+                                'position:fixed',
+                                'top:8px',
+                                'right:8px',
+                                'z-index:2147483647',
+                                'background:rgba(0,0,0,0.75)',
+                                'color:#fff',
+                                "font:12px/1.4 system-ui,Segoe UI,Arial,sans-serif",
+                                'padding:6px 8px',
+                                'border-radius:6px',
+                                'pointer-events:none',
+                                'max-width:30vw',
+                                'box-shadow:0 2px 8px rgba(0,0,0,0.3)',
+                                'white-space:nowrap',
+                            ].join(';');
+                            document.body.appendChild(el);
+                        }
+                        if (!text) {
+                            el.style.display = 'none';
+                            return;
+                        }
+                        el.style.display = 'block';
+                        el.textContent = text;
+                    } catch (e) { /* ignore */ }
+                }
+                """,
+                text,
+            )
+        except Exception:
+            # Never fail the action due to overlay errors
+            pass
+
     def _register_custom_actions(self):
         """Register all custom browser actions"""
 
@@ -61,11 +108,13 @@ class CustomController(Controller):
         )
         async def ask_for_assistant(query: str, browser: BrowserContext):
             if self.ask_assistant_callback:
-                if inspect.iscoroutinefunction(self.ask_assistant_callback):
-                    user_response = await self.ask_assistant_callback(query, browser)
-                else:
-                    user_response = self.ask_assistant_callback(query, browser)
-                msg = f"AI ask: {query}. User response: {user_response['response']}"
+                result = self.ask_assistant_callback(query, browser)
+                user_response = await result if inspect.isawaitable(result) else result
+                try:
+                    resp_text = user_response.get('response') if isinstance(user_response, dict) else str(user_response)
+                except Exception:
+                    resp_text = str(user_response)
+                msg = f"AI ask: {query}. User response: {resp_text}"
                 logger.info(msg)
                 return ActionResult(extracted_content=msg, include_in_memory=True)
             else:
@@ -130,11 +179,14 @@ class CustomController(Controller):
         )
         async def doc_orient_and_extract(query: str, browser: BrowserContext, language: str | None = None, site: str | None = None, scroll_times: int = 3):
             try:
+                await self._set_overlay(browser, "researching…")
                 # 1) Search
                 res1 = await doc_search(query=query, browser=browser, language=language, site=site, new_tab=False)
                 if isinstance(res1, ActionResult) and res1.error:
+                    await self._set_overlay(browser, "")
                     return res1
                 # 2) Click best doc-site result
+                await self._set_overlay(browser, "opening doc…")
                 res2 = await click_best_doc_result(browser=browser)
                 if isinstance(res2, ActionResult) and res2.error:
                     # If no doc link found, stay on current page and try extraction anyway
@@ -144,8 +196,10 @@ class CustomController(Controller):
                     await asyncio.sleep(0.3)
                 except Exception:
                     pass
+                await self._set_overlay(browser, "scrolling…")
                 _ = await self.registry.execute_action("scroll_down", {"times": int(scroll_times)}, browser=browser, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
                 # 4) Identify doc profile
+                await self._set_overlay(browser, "profiling…")
                 prof = await identify_doc_profile(browser=browser)
                 prof_payload = {}
                 if isinstance(prof, ActionResult) and prof.extracted_content:
@@ -154,6 +208,7 @@ class CustomController(Controller):
                     except Exception:
                         prof_payload = {"raw": prof.extracted_content}
                 # 5) Extract sections
+                await self._set_overlay(browser, "reading content…")
                 ext = await fetch_doc_sections_auto(browser=browser, max_items=200, include_html=False)
                 ext_payload = {}
                 if isinstance(ext, ActionResult) and ext.extracted_content:
@@ -166,8 +221,13 @@ class CustomController(Controller):
                     "profile": prof_payload,
                     "extracted": ext_payload,
                 }, ensure_ascii=False)
+                await self._set_overlay(browser, "")
                 return ActionResult(extracted_content=payload, include_in_memory=True)
             except Exception as e:
+                try:
+                    await self._set_overlay(browser, "")
+                except Exception:
+                    pass
                 return ActionResult(error=f"doc_orient_and_extract failed: {e}")
 
         @self.registry.action(
@@ -306,6 +366,7 @@ class CustomController(Controller):
                 chosen_url = candidates[0][1]
 
                 # Navigate via existing go_to_url action to keep consistency
+                await self._set_overlay(browser, "opening doc…")
                 return await self.registry.execute_action(
                     "go_to_url",
                     {"url": chosen_url, "new_tab": bool(new_tab)},
@@ -329,6 +390,7 @@ class CustomController(Controller):
             # Construct Oracle API index URL
             base = f"https://docs.oracle.com/en/java/javase/{ver}/docs/api/index.html"
             logger.info(f"open_java_api_index -> {base}")
+            await self._set_overlay(browser, "opening page…")
             return await self.registry.execute_action(
                 "go_to_url",
                 {"url": base, "new_tab": bool(new_tab)},
@@ -348,6 +410,7 @@ class CustomController(Controller):
                 return ActionResult(error="Empty query for open_javadoc_io_search")
             url = f"https://javadoc.io/search?q={query}"
             logger.info(f"open_javadoc_io_search -> {url}")
+            await self._set_overlay(browser, "opening page…")
             return await self.registry.execute_action(
                 "go_to_url",
                 {"url": url, "new_tab": bool(new_tab)},
@@ -367,6 +430,7 @@ class CustomController(Controller):
             Returns plain text fallback if HTML extract is not available.
             """
             try:
+                await self._set_overlay(browser, "reading content…")
                 pw_ctx = getattr(browser, 'playwright_context', None)
                 if not pw_ctx:
                     return ActionResult(error="Playwright context missing")
@@ -385,8 +449,13 @@ class CustomController(Controller):
                         text = txt or ""
                     except Exception:
                         pass
+                await self._set_overlay(browser, "")
                 return ActionResult(extracted_content=text.strip(), include_in_memory=True)
             except Exception as e:
+                try:
+                    await self._set_overlay(browser, "")
+                except Exception:
+                    pass
                 return ActionResult(error=f"extract_main_content failed: {e}")
 
         @self.registry.action(
@@ -401,6 +470,7 @@ class CustomController(Controller):
             Returns JSON with keys per section.
             """
             try:
+                await self._set_overlay(browser, "reading content…")
                 pw_ctx = getattr(browser, 'playwright_context', None)
                 if not pw_ctx:
                     return ActionResult(error="Playwright context missing")
@@ -453,8 +523,17 @@ class CustomController(Controller):
                 data["field_summary"] = await _collect(["#field-summary", "table.field-summary, .field-summary, .memberSummary:has(> caption:has-text('Field Summary')) a"]) 
                 data["details"] = await _collect(["#method-details, #field-details, #constructor-details, .details"]) 
 
-                return ActionResult(extracted_content=json.dumps(data, ensure_ascii=False), include_in_memory=True)
+                result = ActionResult(extracted_content=json.dumps(data, ensure_ascii=False), include_in_memory=True)
+                try:
+                    await self._set_overlay(browser, "")
+                except Exception:
+                    pass
+                return result
             except Exception as e:
+                try:
+                    await self._set_overlay(browser, "")
+                except Exception:
+                    pass
                 return ActionResult(error=f"fetch_java_doc_sections failed: {e}")
 
         @self.registry.action(
@@ -501,6 +580,7 @@ class CustomController(Controller):
         )
         async def fetch_doc_sections_auto(browser: BrowserContext, max_items: int = 200, include_html: bool = False):
             try:
+                await self._set_overlay(browser, "reading content…")
                 pw_ctx = getattr(browser, 'playwright_context', None)
                 if not pw_ctx:
                     return ActionResult(error="Playwright context missing")
@@ -688,8 +768,17 @@ class CustomController(Controller):
                     "profile": profile,
                     "data": data
                 }, ensure_ascii=False)
-                return ActionResult(extracted_content=payload, include_in_memory=True)
+                result = ActionResult(extracted_content=payload, include_in_memory=True)
+                try:
+                    await self._set_overlay(browser, "")
+                except Exception:
+                    pass
+                return result
             except Exception as e:
+                try:
+                    await self._set_overlay(browser, "")
+                except Exception:
+                    pass
                 return ActionResult(error=f"fetch_doc_sections_auto failed: {e}")
 
         @self.registry.action(
@@ -794,6 +883,27 @@ class CustomController(Controller):
         try:
             for action_name, params in action.model_dump(exclude_unset=True).items():
                 if params is not None:
+                    # Set a small overlay to indicate current activity
+                    try:
+                        label_map = {
+                            "search_google": "researching…",
+                            "go_to_url": "opening page…",
+                            "open_tab": "opening tab…",
+                            "open_new_tab": "opening tab…",
+                            "scroll_down": "scrolling…",
+                            "scroll": "scrolling…",
+                            "extract_main_content": "reading content…",
+                            "fetch_doc_sections_auto": "reading content…",
+                            "fetch_java_doc_sections": "reading content…",
+                            "click_best_doc_result": "opening doc…",
+                            "doc_search": "researching…",
+                            "doc_orient_and_extract": "researching…",
+                        }
+                        label = label_map.get(action_name, f"{action_name.replace('_',' ')}…")
+                        if browser_context:
+                            await self._set_overlay(browser_context, label)
+                    except Exception:
+                        pass
                     # -- Search engine selection and URL rewrite hooks --
                     # Support both dict params and Pydantic BaseModel params
                     try:
@@ -838,21 +948,28 @@ class CustomController(Controller):
                                 logger.info(f"Rewriting blocked URL: {current_url} -> {rewritten}")
                                 params = _set_attr(params, "url", rewritten)
 
-                    if action_name.startswith("mcp"):
-                        # this is a mcp tool
-                        logger.debug(f"Invoke MCP tool: {action_name}")
-                        mcp_tool = self.registry.registry.actions.get(action_name).function
-                        result = await mcp_tool.ainvoke(params)
-                    else:
-                        result = await self.registry.execute_action(
-                            action_name,
-                            params,
-                            browser=browser_context,
-                            page_extraction_llm=page_extraction_llm,
-                            sensitive_data=sensitive_data,
-                            available_file_paths=available_file_paths,
-                            context=context,
-                        )
+                    try:
+                        if action_name.startswith("mcp"):
+                            # this is a mcp tool
+                            logger.debug(f"Invoke MCP tool: {action_name}")
+                            mcp_tool = self.registry.registry.actions.get(action_name).function
+                            result = await mcp_tool.ainvoke(params)
+                        else:
+                            result = await self.registry.execute_action(
+                                action_name,
+                                params,
+                                browser=browser_context,
+                                page_extraction_llm=page_extraction_llm,
+                                sensitive_data=sensitive_data,
+                                available_file_paths=available_file_paths,
+                                context=context,
+                            )
+                    finally:
+                        try:
+                            if browser_context:
+                                await self._set_overlay(browser_context, "")
+                        except Exception:
+                            pass
 
                     if isinstance(result, str):
                         return ActionResult(extracted_content=result)

@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -70,7 +71,7 @@ async def get_controller(ask_human_callback: Optional[Any] = None) -> CustomCont
     if settings.server.mcp_config:
         try:
             mcp_dict_config = settings.server.mcp_config
-            if isinstance(settings.server.mcp_config, str): # if passed as JSON string
+            if isinstance(settings.server.mcp_config, str):  # if passed as JSON string
                 mcp_dict_config = json.loads(settings.server.mcp_config)
             await controller.setup_mcp_client(mcp_dict_config)
         except Exception as e:
@@ -212,15 +213,17 @@ def serve() -> FastMCP:
         browser_instance: Optional[CustomBrowser] = None
         context_instance: Optional[CustomBrowserContext] = None
         controller_instance: Optional[CustomController] = None
+        agent_instance: Optional[BrowserUseAgent] = None
 
+        cancelled = False
         try:
-            async with resource_lock: # Protect shared resource access/creation
+            async with resource_lock:  # Protect shared resource access/creation
                 browser_instance, context_instance = await get_browser_and_context()
                 # For server, ask_human_callback is likely not interactive, can be None or a placeholder
                 controller_instance = await get_controller(ask_human_callback=None)
 
             if not browser_instance or not context_instance or not controller_instance:
-                 raise RuntimeError("Failed to acquire browser resources or controller.")
+                raise RuntimeError("Failed to acquire browser resources or controller.")
 
             main_llm_config = settings.get_llm_config()
             main_llm = internal_llm_provider.get_llm_model(**main_llm_config)
@@ -258,21 +261,87 @@ def serve() -> FastMCP:
             final_result = history.final_result() or "Agent finished without a final result."
             logger.info(f"Agent task completed. Result: {final_result[:100]}...")
 
+        except asyncio.CancelledError:
+            # Propagate cancellation to the agent and ensure browser is stopped
+            logger.warning("run_browser_agent was cancelled by the client; stopping agent and closing browser/context...")
+            try:
+                if agent_instance and hasattr(agent_instance, 'stop'):
+                    maybe = agent_instance.stop()
+                    if inspect.isawaitable(maybe):
+                        await maybe
+                elif agent_instance and hasattr(agent_instance, 'state'):
+                    try:
+                        setattr(agent_instance.state, 'stopped', True)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"Error while stopping agent on cancel: {e}")
+
+            # Force-close resources on cancel even if keep_open/use_own_browser
+            orig_context = context_instance
+            orig_browser = browser_instance
+            try:
+                if orig_context:
+                    await orig_context.close()
+            except Exception:
+                pass
+            try:
+                if orig_browser:
+                    await orig_browser.close()
+            except Exception:
+                pass
+
+            # Null out references to avoid double close in finally
+            context_instance = None
+            browser_instance = None
+
+            # Clear shared instances if they were pointing to the ones we closed
+            try:
+                if settings.browser.keep_open:
+                    global shared_browser_instance, shared_context_instance
+                    # Compare against original references before we nulled locals
+                    if shared_context_instance is orig_context:
+                        shared_context_instance = None
+                    if shared_browser_instance is orig_browser:
+                        shared_browser_instance = None
+            except Exception:
+                pass
+
+            # Try to close controller MCP client if it's not shared
+            try:
+                if controller_instance and not (settings.browser.keep_open and controller_instance == shared_controller_instance):
+                    await controller_instance.close_mcp_client()
+            except Exception:
+                pass
+
+            final_result = "Cancelled by client."
+            cancelled = True
+            # After cleanup, return a cancelled result
+            return final_result
         except Exception as e:
             logger.error(f"Error in run_browser_agent: {e}\n{traceback.format_exc()}")
             final_result = f"Error: {e}"
         finally:
-            if not settings.browser.keep_open and not settings.browser.use_own_browser:
-                logger.info("Closing browser resources for this call.")
-                if context_instance:
-                    await context_instance.close()
-                if browser_instance:
-                    await browser_instance.close()
-                if controller_instance: # Close controller only if not shared
-                    await controller_instance.close_mcp_client()
-            elif settings.browser.use_own_browser: # Own browser, only close controller if not shared
-                 if controller_instance and not (settings.browser.keep_open and controller_instance == shared_controller_instance):
-                    await controller_instance.close_mcp_client()
+            # Normal cleanup when not cancelled
+            if not cancelled and not settings.browser.keep_open and not settings.browser.use_own_browser:
+                try:
+                    logger.info("Closing browser resources for this call.")
+                    if context_instance:
+                        await context_instance.close()
+                    if browser_instance:
+                        await browser_instance.close()
+                finally:
+                    if controller_instance:  # Close controller only if not shared
+                        try:
+                            await controller_instance.close_mcp_client()
+                        except Exception:
+                            pass
+            elif not cancelled and settings.browser.use_own_browser:  # Own browser, only close controller if not shared
+                if controller_instance and not (settings.browser.keep_open and controller_instance == shared_controller_instance):
+                    try:
+                        await controller_instance.close_mcp_client()
+                    except Exception:
+                        pass
         return final_result
 
     @server.tool()
@@ -284,6 +353,7 @@ def serve() -> FastMCP:
         logger.info(f"Received run_deep_research task: {research_task[:100]}...")
         task_id = str(uuid.uuid4()) # This task_id is used for the sub-directory name
         report_content = "Error: Deep research failed."
+        agent_instance: Optional[DeepResearchAgent] = None
 
         try:
             main_llm_config = settings.get_llm_config() # Deep research uses main LLM config
@@ -353,6 +423,16 @@ def serve() -> FastMCP:
                 logger.warning(report_content)
 
 
+        except asyncio.CancelledError:
+            logger.warning("run_deep_research was cancelled by the client; stopping agent...")
+            try:
+                if agent_instance and hasattr(agent_instance, 'stop'):
+                    maybe = agent_instance.stop()
+                    if inspect.isawaitable(maybe):
+                        await maybe
+            except Exception as e:
+                logger.error(f"Error while stopping deep research agent on cancel: {e}")
+            return "Cancelled by client."
         except Exception as e:
             logger.error(f"Error in run_deep_research: {e}\n{traceback.format_exc()}")
             report_content = f"Error: {e}"
