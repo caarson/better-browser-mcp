@@ -90,7 +90,7 @@ MCP_SERVER_LOGGING_LEVEL=INFO
 ## Credits
 
 - Original project: https://github.com/Saik0s/mcp-browser-use
-- This fork: https://github.com/caarson/mcp-browser-use
+- This fork: https://github.com/caarson/better-browser-mcp
 
 <p align="center">
   <img src="./assets/better-browser-mcp-logo.png" alt="logo" width="120" />
