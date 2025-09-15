@@ -18,7 +18,7 @@ This is an upgraded fork of the original project:
   *   **Description:** Auto-selects between `task`, `research`, and `deep_research` using the same heuristics as `run_research(mode="auto")`.
   *   **Arguments:**
     *   `topic_or_task` (string, required)
-    *   `max_parallel_browsers_override` (integer, optional)
+  *   `max_windows` (integer, optional)
   *   **Returns:** (string) Final result or research report string.
 
 2.  **`run_research`**
@@ -91,7 +91,7 @@ Everything you expect from the original—plus pragmatic upgrades:
         "MCP_AGENT_TOOL_USE_VISION": "true",
 
         "MCP_RESEARCH_TOOL_SAVE_DIR": "/path/to/your/research",
-        "MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS": "5",
+  "MCP_RESEARCH_TOOL_MAX_WINDOWS": "5",
 
         "MCP_PATHS_DOWNLOADS": "/path/to/your/downloads",
 
@@ -166,12 +166,19 @@ This server exposes the following tools via the Model Context Protocol:
 
 ### Synchronous Tools (Wait for Completion)
 
-1.  **`run_research`**
+1.  **`run_auto`**
+  *   **Description:** Auto-selects between `task`, `research`, and `deep_research` using routing heuristics.
+  *   **Arguments:**
+    *   `topic_or_task` (string, required): The prompt describing the task or research topic.
+    *   `max_windows` (integer, optional): Upper bound on parallel windows if deep research is chosen.
+  *   **Returns:** (string) Final result or research report string.
+
+2.  **`run_research`**
   *   **Description:** Unified entrypoint with modes to handle both browsing tasks and research.
   *   **Arguments:**
     *   `topic_or_task` (string, required): The prompt describing the task or research topic.
     *   `mode` (string, optional): `auto` (default), `task`, `research`, or `deep_research`.
-    *   `max_parallel_browsers_override` (integer, optional): Only used when `deep_research` is selected.
+    *   `max_windows` (integer, optional): Only used when `deep_research` is selected.
   *   **Returns:** (string) Final result or research report string.
   *   **Env override:** `MCP_RESEARCH_MODE=auto|task|research|deep_research` (default: `auto`).
 
@@ -182,17 +189,11 @@ This server exposes the following tools via the Model Context Protocol:
     *   `max_windows` (integer, optional): Passed through if deep research is chosen to cap parallel windows.
   *   **Returns:** (string) The final result or deep research report string.
 
-3.  **`run_browser_agent`**
-    *   **Description:** Executes a browser automation task based on natural language instructions and waits for it to complete. Uses settings from `MCP_AGENT_TOOL_*`, `MCP_LLM_*`, and `MCP_BROWSER_*` environment variables.
-    *   **Arguments:**
-        *   `task` (string, required): The primary task or objective.
-    *   **Returns:** (string) The final result extracted by the agent or an error message. Agent history (JSON, optional GIF) saved if `MCP_AGENT_TOOL_HISTORY_PATH` is set.
-
 4.  **`run_deep_research`**
     *   **Description:** Performs in-depth web research on a topic, generates a report, and waits for completion. Uses settings from `MCP_RESEARCH_TOOL_*`, `MCP_LLM_*`, and `MCP_BROWSER_*` environment variables. If `MCP_RESEARCH_TOOL_SAVE_DIR` is set, outputs are saved to a subdirectory within it; otherwise, operates in memory-only mode.
     *   **Arguments:**
     *   `research_task` (string, required): The topic or question for the research.
-    *   `max_windows` (integer, optional): Overrides `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS` from environment (caps simultaneous windows used by sub-agents).
+  *   `max_windows` (integer, optional): Overrides `MCP_RESEARCH_TOOL_MAX_WINDOWS` from environment (caps simultaneous windows used by sub-agents).
     *   **Returns:** (string) The generated research report in Markdown format, including the file path (if saved), or an error message.
 
 ## CLI Usage
@@ -219,17 +220,17 @@ This package also provides a command-line interface `mcp-browser-cli` for direct
     *   **Arguments:**
         *   `RESEARCH_TASK` (string, required): The topic or question for research.
     *   **Options:**
-        *   `--max-parallel-browsers INTEGER, -p INTEGER`: Override `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`.
+  *   `--max-windows INTEGER, -w INTEGER`: Override `MCP_RESEARCH_TOOL_MAX_WINDOWS`.
     *   **Example:**
         ```bash
-  mcp-browser-cli run-deep-research "What are the latest advancements in AI-driven browser automation?" --max-parallel-browsers 5 -e .env
+  mcp-browser-cli run-deep-research "What are the latest advancements in AI-driven browser automation?" --max-windows 5 -e .env
         ```
 
 All other configurations (LLM keys, paths, browser settings) are picked up from environment variables (or the specified `.env` file) as detailed in the Configuration section.
 
 ### Router behavior (run_task)
 
-`run_task` chooses between `run_browser_agent` (lightweight) and `run_deep_research` (heavy). It favors single-window direct completion for tasks like opening GitHub, documentation, or a single README. It escalates only when the prompt clearly indicates multi-source synthesis, investigation/troubleshooting, or when the agent hits blockers.
+`run_task` chooses between a lightweight internal browser agent and `run_deep_research` (heavy). It favors single-window direct completion for tasks like opening GitHub, documentation, or a single README. It escalates only when the prompt clearly indicates multi-source synthesis, investigation/troubleshooting, or when the agent hits blockers.
 
 Control routing with:
 
@@ -258,7 +259,7 @@ You can configure everything via env vars or a `.env` file. Highlights of the mo
 - LLM: `MCP_LLM_PROVIDER`, `MCP_LLM_MODEL_NAME`, provider-specific API keys.
 - Browser: `MCP_BROWSER_HEADLESS`, `MCP_BROWSER_USE_OWN_BROWSER`, `MCP_BROWSER_CDP_URL`, `MCP_BROWSER_KEEP_OPEN`.
 - Agent: `MCP_AGENT_TOOL_MAX_STEPS`, `MCP_AGENT_TOOL_USE_VISION`, `MCP_AGENT_TOOL_HISTORY_PATH`.
-- Deep Research: `MCP_RESEARCH_TOOL_SAVE_DIR`, `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS` (default: 1 here).
+- Deep Research: `MCP_RESEARCH_TOOL_SAVE_DIR`, `MCP_RESEARCH_TOOL_MAX_WINDOWS` (default: 1 here). Legacy alias supported: `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`.
 - Router: `MCP_TASK_ROUTER_MODE=auto|always-task|always-research`.
 - Unified mode: `MCP_RESEARCH_MODE=auto|task|research|deep_research`.
 
@@ -336,7 +337,7 @@ Configure the server and CLI using environment variables. You can set these in y
 |                                     | `MCP_AGENT_TOOL_SAVE_RECORDING_PATH`           | Optional: Path to save recordings. If not set, recording to file is disabled even if `ENABLE_RECORDING=true`. | ` ` (empty, recording disabled)   |
 |                                     | `MCP_AGENT_TOOL_HISTORY_PATH`                  | Optional: Directory to save agent history JSON files. If not set, history saving is disabled.              | ` ` (empty, history saving disabled) |
 | **Research Tool (MCP_RESEARCH_TOOL_)** |                                             | Settings for the `run_deep_research` tool.                                                                 |                                   |
-|                                     | `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`      | Max parallel browser instances for deep research.                                                          | `1`                               |
+|                                     | `MCP_RESEARCH_TOOL_MAX_WINDOWS`                | Max parallel browser windows for deep research. Legacy alias: `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`.   | `1`                               |
 |                                     | `MCP_RESEARCH_TOOL_SAVE_DIR`                   | Optional: Base directory to save research artifacts. Task ID will be appended. If not set, operates in memory-only mode. | `None`                           |
 | **Paths (MCP_PATHS_)**              |                                                | General path settings.                                                                                     |                                   |
 |                                     | `MCP_PATHS_DOWNLOADS`                          | Optional: Directory for downloaded files. If not set, persistent downloads to a specific path are disabled.  | ` ` (empty, downloads disabled)  |

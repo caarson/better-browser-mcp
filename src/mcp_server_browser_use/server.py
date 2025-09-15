@@ -20,13 +20,15 @@ numeric_level = getattr(logging, log_level_str, logging.INFO)
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 
-logging.basicConfig(
-    level=numeric_level,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    filename=settings.server.log_file if settings.server.log_file else None,
-    filemode="a" if settings.server.log_file else None, # only use filemode if filename is set
-    force=True # Override any previous basicConfig
-)
+_basic_cfg_kwargs: Dict[str, Any] = {
+    "level": numeric_level,
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "force": True,
+}
+if settings.server.log_file:
+    _basic_cfg_kwargs["filename"] = settings.server.log_file
+    _basic_cfg_kwargs["filemode"] = "a"
+logging.basicConfig(**_basic_cfg_kwargs)
 
 logger = logging.getLogger("mcp_server_browser_use")
 # Prevent log propagation if other loggers are configured higher up
@@ -301,7 +303,7 @@ def serve() -> FastMCP:
                 mcp_server_config=mcp_server_config_for_agent,
             )
 
-            current_max_parallel_browsers = max_windows if max_windows is not None else settings.research_tool.max_parallel_browsers
+            current_max_parallel_browsers = max_windows if max_windows is not None else settings.research_tool.max_windows
 
             # Check if save_dir is provided, otherwise use in-memory approach
             save_dir_for_this_task = None
@@ -312,13 +314,13 @@ def serve() -> FastMCP:
             else:
                 logger.info("No save_dir configured. Deep research will operate in memory-only mode.")
 
-            logger.info(f"Using max_parallel_browsers (max_windows): {current_max_parallel_browsers}")
+            logger.info(f"Using max_windows: {current_max_parallel_browsers}")
 
             result_dict = await agent_instance.run(
                 topic=research_task,
                 save_dir=save_dir_for_this_task, # Can be None now
                 task_id=task_id, # Pass the generated task_id
-                max_parallel_browsers=current_max_parallel_browsers
+                max_windows=current_max_parallel_browsers
             )
 
             # Handle the result based on if files were saved or not
@@ -498,6 +500,36 @@ def serve() -> FastMCP:
 server_instance = serve() # Renamed from 'server' to avoid conflict with 'settings.server'
 
 def main():
+    # Respect help/version probes so clients like uvx or MCP tool discovery don't accidentally start the server
+    args = sys.argv[1:]
+    if any(a in ("-h", "--help", "help", "/?") for a in args):
+        # Print a compact usage and exit without starting the server
+        try:
+            from importlib.metadata import version
+            ver = version("mcp_server_browser_use")
+        except Exception:
+            ver = "unknown"
+        usage = (
+            f"mcp-server-browser-use v{ver}\n"
+            "Usage: mcp-server-browser-use [--help] [--version]\n\n"
+            "Starts the MCP server on stdio. Configure via environment variables.\n\n"
+            "Exposed MCP tools:\n"
+            "  - run_auto(topic_or_task, max_windows?)\n"
+            "  - run_research(topic_or_task, mode=auto|task|research|deep_research, max_windows?)\n"
+            "  - run_task(task, max_windows?)\n"
+            "  - run_deep_research(research_task, max_windows?)\n"
+        )
+        print(usage)
+        return
+    if any(a in ("-V", "--version", "version") for a in args):
+        try:
+            from importlib.metadata import version
+            ver = version("mcp_server_browser_use")
+        except Exception:
+            ver = "unknown"
+        print(ver)
+        return
+
     logger.info("Starting MCP server for browser-use...")
     try:
         # Just log the Research tool save directory if it's configured

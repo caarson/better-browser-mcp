@@ -191,54 +191,159 @@ class BrowserSearchInput(BaseModel):
 
 
 async def _run_browser_search_tool(
-        queries: List[str],
-        task_id: str,  # Injected dependency
-        llm: Any,  # Injected dependency
-        browser_config: Dict[str, Any],
-        stop_event: threading.Event,
-        max_parallel_browsers: int = 1
+    queries: List[str],
+    task_id: str,  # Injected dependency
+    llm: Any,  # Injected dependency
+    browser_config: Dict[str, Any],
+    stop_event: threading.Event,
+    max_windows: int = 1
 ) -> List[Dict[str, Any]]:
     """
-    Internal function to execute parallel browser searches based on LLM-provided queries.
-    Handles concurrency and stop signals.
+    Execute browser searches based on LLM-provided queries.
+    Spawns up to `max_windows` browser windows (contexts) concurrently.
+    Each window processes multiple queries sequentially to minimize window churn.
     """
 
-    # Limit queries just in case LLM ignores the description
-    queries = queries[:max_parallel_browsers]
-    logger.info(f"[Browser Tool {task_id}] Running search for {len(queries)} queries: {queries}")
+    if not queries:
+        logger.info(f"[Browser Tool {task_id}] No queries provided, nothing to run.")
+        return []
 
-    results = []
-    semaphore = asyncio.Semaphore(max_parallel_browsers)
+    logger.info(
+        f"[Browser Tool {task_id}] Running {len(queries)} queries with up to {max_windows} concurrent windows."
+    )
 
-    async def task_wrapper(query):
-        async with semaphore:
-            if stop_event.is_set():
-                logger.info(f"[Browser Tool {task_id}] Skipping task due to stop signal: {query}")
-                return {"query": query, "result": None, "status": "cancelled"}
-            # Pass necessary injected configs and the stop event
-            return await run_single_browser_task(
-                query,
-                task_id,
-                llm,  # Pass the main LLM (or a dedicated one if needed)
-                browser_config,
-                stop_event
-                # use_vision could be added here if needed
+    # Build an indexed queue to preserve input order in results
+    queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
+    for idx, q in enumerate(queries):
+        queue.put_nowait((idx, q))
+
+    results: list[Optional[Dict[str, Any]]] = [None] * len(queries)
+
+    async def window_worker(worker_id: int):
+        """Each worker owns one browser and one context; processes queries sequentially."""
+        if stop_event.is_set():
+            return
+        bu_browser = None
+        bu_browser_context = None
+        try:
+            # Mirror setup from run_single_browser_task, but reuse across multiple queries
+            headless = browser_config.get("headless", False)
+            window_w = browser_config.get("window_width", 1280)
+            window_h = browser_config.get("window_height", 1100)
+            browser_user_data_dir = browser_config.get("user_data_dir", None)
+            use_own_browser = browser_config.get("use_own_browser", False)
+            browser_binary_path = browser_config.get("browser_binary_path", None)
+            wss_url = browser_config.get("wss_url", None)
+            cdp_url = browser_config.get("cdp_url", None)
+            disable_security = browser_config.get("disable_security", False)
+            save_downloads_path = browser_config.get("save_downloads_path", None)
+            trace_path = browser_config.get("trace_path", None)
+
+            from ...browser.custom_browser import CustomBrowser
+            from ...browser.custom_context import CustomBrowserContextConfig
+            from ...controller.custom_controller import CustomController
+            from ...agent.browser_use.browser_use_agent import BrowserUseAgent
+
+            extra_args = [f"--window-size={window_w},{window_h}"]
+            if browser_user_data_dir:
+                extra_args.append(f"--user-data-dir={browser_user_data_dir}")
+            if use_own_browser:
+                # For CDP attach, let underlying class handle paths; prefer env if provided
+                browser_binary_path = os.getenv("CHROME_PATH", None) or browser_binary_path
+                if browser_binary_path == "":
+                    browser_binary_path = None
+                chrome_user_data = os.getenv("CHROME_USER_DATA", None)
+                if chrome_user_data:
+                    extra_args += [f"--user-data-dir={chrome_user_data}"]
+            else:
+                browser_binary_path = None
+
+            bu_browser = CustomBrowser(
+                config=BrowserConfig(
+                    headless=headless,
+                    disable_security=disable_security,
+                    browser_binary_path=browser_binary_path,
+                    extra_browser_args=extra_args,
+                    wss_url=wss_url,
+                    cdp_url=cdp_url,
+                )
             )
 
-    tasks = [task_wrapper(query) for query in queries]
-    search_results = await asyncio.gather(*tasks, return_exceptions=True)
+            context_config = CustomBrowserContextConfig(
+                save_downloads_path=save_downloads_path,
+                trace_path=trace_path,
+                browser_window_size=BrowserContextWindowSize(width=window_w, height=window_h),
+                force_new_context=False,
+            )
+            bu_browser_context = await bu_browser.new_context(config=context_config)
+            controller = CustomController()
 
-    processed_results = []
-    for i, res in enumerate(search_results):
-        query = queries[i]  # Get corresponding query
-        if isinstance(res, Exception):
-            logger.error(f"[Browser Tool {task_id}] Gather caught exception for query '{query}': {res}", exc_info=True)
-            processed_results.append({"query": query, "error": str(res), "status": "failed"})
-        elif isinstance(res, dict):
-            processed_results.append(res)
+            async def process_one(idx: int, query: str):
+                if stop_event.is_set():
+                    results[idx] = {"query": query, "result": None, "status": "cancelled"}
+                    return
+                bu_task_prompt = f"""
+                Browsing rule: When a search results page shows text like 'Showing results for' and also offers 'Search instead for <literal>', click the 'Search instead for' (or equivalent) to force the exact query. This applies to Brave, Bing, DuckDuckGo, and Google. Also look for similar UI like 'Did you mean' or 'Including results for' and prefer exact-match links.
+
+                Research Task: {query}
+                    Objective: Find relevant information answering the query.
+                    Output Requirements: For each relevant piece of information found, please provide:
+                    1. A concise summary of the information.
+                    2. The title of the source page or document.
+                    3. The URL of the source.
+                    Focus on accuracy and relevance. Avoid irrelevant details.
+                    PDF cannot directly extract _content, please try to download first, then using read_file, if you can't save or read, please try other methods.
+                """
+
+                agent = BrowserUseAgent(
+                    task=bu_task_prompt,
+                    llm=llm,
+                    browser=bu_browser,
+                    browser_context=bu_browser_context,
+                    controller=controller,
+                    use_vision=False,
+                )
+                try:
+                    res = await agent.run()
+                    final_data = res.final_result()
+                    results[idx] = {"query": query, "result": final_data, "status": "completed"}
+                except Exception as e:
+                    logger.error(f"[Browser Tool {task_id}] Error for query '{query}': {e}", exc_info=True)
+                    results[idx] = {"query": query, "error": str(e), "status": "failed"}
+
+            # Loop until queue is empty
+            while not queue.empty() and not stop_event.is_set():
+                try:
+                    idx, q = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                await process_one(idx, q)
+                queue.task_done()
+        finally:
+            # Close context and browser for this window
+            try:
+                if bu_browser_context:
+                    await bu_browser_context.close()
+            except Exception:
+                pass
+            try:
+                if bu_browser:
+                    await bu_browser._close_without_httpxclients()
+            except Exception:
+                pass
+
+    worker_count = max(1, min(max_windows, len(queries)))
+    workers = [asyncio.create_task(window_worker(i)) for i in range(worker_count)]
+    await asyncio.gather(*workers)
+
+    # Build output in input order, substituting failures for any None entries
+    processed_results: List[Dict[str, Any]] = []
+    for i, q in enumerate(queries):
+        item = results[i]
+        if item is None:
+            processed_results.append({"query": q, "error": "No result produced", "status": "failed"})
         else:
-            logger.error(f"[Browser Tool {task_id}] Unexpected result type for query '{query}': {type(res)}")
-            processed_results.append({"query": query, "error": "Unexpected result type", "status": "failed"})
+            processed_results.append(item)
 
     logger.info(f"[Browser Tool {task_id}] Finished search. Results count: {len(processed_results)}")
     return processed_results
@@ -249,7 +354,7 @@ def create_browser_search_tool(
         browser_config: Dict[str, Any],
         task_id: str,
         stop_event: threading.Event,
-        max_parallel_browsers: int = 1,
+    max_windows: int = 1,
 ) -> StructuredTool:
     """Factory function to create the browser search tool with necessary dependencies."""
     # Use partial to bind the dependencies that aren't part of the LLM call arguments
@@ -260,15 +365,15 @@ def create_browser_search_tool(
         llm=llm,
         browser_config=browser_config,
         stop_event=stop_event,
-        max_parallel_browsers=max_parallel_browsers
+        max_windows=max_windows
     )
 
     return StructuredTool.from_function(
         coroutine=bound_tool_func,
         name="parallel_browser_search",
-        description=f"""Use this tool to actively search the web for information related to a specific research task or question.
-It runs up to {max_parallel_browsers} searches in parallel using a browser agent for better results than simple scraping.
-Provide a list of distinct search queries(up to {max_parallel_browsers}) that are likely to yield relevant information.""",
+    description=f"""Use this tool to actively search the web for information related to a specific research task or question.
+Executes searches with up to {max_windows} concurrent browser windows. Each window can handle multiple queries sequentially to maximize reuse.
+Provide a list of distinct search queries that are likely to yield relevant information.""",
         args_schema=BrowserSearchInput,
     )
 
@@ -789,7 +894,7 @@ class DeepResearchAgent:
         self.stop_event: Optional[threading.Event] = None
         self.runner: Optional[asyncio.Task] = None  # To hold the asyncio task for run
 
-    async def _setup_tools(self, task_id: str, stop_event: threading.Event, max_parallel_browsers: int = 1) -> List[
+    async def _setup_tools(self, task_id: str, stop_event: threading.Event, max_windows: int = 1) -> List[
         Tool]:
         """Sets up the basic tools (File I/O) and optional MCP tools."""
         tools = [WriteFileTool(), ReadFileTool(), ListDirectoryTool()]  # Basic file operations
@@ -798,7 +903,7 @@ class DeepResearchAgent:
             browser_config=self.browser_config,
             task_id=task_id,
             stop_event=stop_event,
-            max_parallel_browsers=max_parallel_browsers
+            max_windows=max_windows
         )
         tools += [browser_use_tool]
         # Add MCP tools if config is provided
@@ -855,7 +960,7 @@ class DeepResearchAgent:
         app = workflow.compile()
         return app
 
-    async def run(self, topic: str, save_dir: Optional[str] = None, task_id: Optional[str] = None, max_parallel_browsers: int = 1) -> Dict[str, Any]:
+    async def run(self, topic: str, save_dir: Optional[str] = None, task_id: Optional[str] = None, max_parallel_browsers: int = 1, *, max_windows: Optional[int] = None) -> Dict[str, Any]:
         """
         Starts the deep research process.
 
@@ -863,7 +968,8 @@ class DeepResearchAgent:
             topic: The research topic.
             save_dir: Optional directory to save outputs for this task. If None, operates in memory-only mode.
             task_id: Optional existing task ID to resume. If None, a new ID is generated.
-            max_parallel_browsers: Max parallel browsers for the search tool.
+            max_parallel_browsers: Max parallel browsers for the search tool. Deprecated: prefer max_windows.
+            max_windows: Preferred naming alias for parallel browser windows.
 
         Returns:
              A dictionary containing the final status, message, task_id, and final_state.
@@ -886,7 +992,9 @@ class DeepResearchAgent:
 
         self.stop_event = threading.Event()
         _AGENT_STOP_FLAGS[self.current_task_id] = self.stop_event
-        agent_tools = await self._setup_tools(self.current_task_id, self.stop_event, max_parallel_browsers)
+        # Backward compatibility: max_windows overrides max_parallel_browsers if provided
+        effective_max = max_windows if max_windows is not None else max_parallel_browsers
+        agent_tools = await self._setup_tools(self.current_task_id, self.stop_event, effective_max)
         initial_state: DeepResearchState = {
             "task_id": self.current_task_id,
             "topic": topic,

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from .config import AppSettings, settings as global_settings # Import AppSettings and the global instance
 # Import from _internal
-from ._internal.agent.browser_use.browser_use_agent import BrowserUseAgent, AgentHistoryList
+from ._internal.agent.browser_use.browser_use_agent import BrowserUseAgent
 from ._internal.agent.deep_research.deep_research_agent import DeepResearchAgent
 from ._internal.browser.custom_browser import CustomBrowser
 from ._internal.browser.custom_context import (
@@ -23,7 +23,7 @@ from ._internal.browser.custom_context import (
 from ._internal.controller.custom_controller import CustomController
 from ._internal.utils import llm_provider as internal_llm_provider
 from browser_use.browser.browser import BrowserConfig
-from browser_use.agent.views import AgentOutput
+from browser_use.agent.views import AgentOutput, AgentHistoryList
 from browser_use.browser.views import BrowserState
 
 app = typer.Typer(name="mcp-browser-cli", help="CLI for mcp-browser-use tools.")
@@ -38,13 +38,15 @@ def setup_logging(level_str: str, log_file: Optional[str]):
     numeric_level = getattr(logging, level_str.upper(), logging.INFO)
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
-    logging.basicConfig(
-        level=numeric_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        filename=log_file if log_file else None,
-        filemode="a" if log_file else None,
-        force=True
-    )
+    basic_cfg: Dict[str, Any] = {
+        "level": numeric_level,
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "force": True,
+    }
+    if log_file:
+        basic_cfg["filename"] = log_file
+        basic_cfg["filemode"] = "a"
+    logging.basicConfig(**basic_cfg)
 
 @app.callback()
 def main_callback(
@@ -74,8 +76,10 @@ def main_callback(
         raise typer.Exit(code=1)
 
     # Setup logging based on final settings (env file, then env vars, then CLI override)
-    final_log_level = log_level if log_level else cli_state.settings.server.logging_level
-    final_log_file = cli_state.settings.server.log_file
+    assert cli_state.settings is not None
+    settings_obj = cli_state.settings
+    final_log_level = log_level if log_level else settings_obj.server.logging_level
+    final_log_file = settings_obj.server.log_file
     setup_logging(final_log_level, final_log_file)
 
     logger.info(f"CLI initialized. Effective log level: {final_log_level.upper()}")
@@ -205,7 +209,7 @@ async def _run_browser_agent_logic_cli(task_str: str, current_settings: AppSetti
     return final_result
 
 
-async def _run_deep_research_logic_cli(research_task_str: str, max_parallel_browsers_override: Optional[int], current_settings: AppSettings) -> str:
+async def _run_deep_research_logic_cli(research_task_str: str, max_windows_override: Optional[int], current_settings: AppSettings) -> str:
     logger.info(f"CLI: Starting run_deep_research task: {research_task_str[:100]}...")
     task_id = str(uuid.uuid4())
     report_content = "Error: Deep research failed."
@@ -239,17 +243,18 @@ async def _run_deep_research_logic_cli(research_task_str: str, max_parallel_brow
             mcp_server_config=mcp_server_config_for_agent,
         )
 
-        current_max_parallel_browsers = max_parallel_browsers_override if max_parallel_browsers_override is not None else current_settings.research_tool.max_parallel_browsers
+        current_max_parallel_browsers = max_windows_override if max_windows_override is not None else current_settings.research_tool.max_windows
 
-        save_dir_for_task = os.path.join(current_settings.research_tool.save_dir, task_id)
-        os.makedirs(save_dir_for_task, exist_ok=True)
-
-        logger.info(f"CLI Deep research save directory: {save_dir_for_task}")
-        logger.info(f"CLI Using max_parallel_browsers: {current_max_parallel_browsers}")
+        save_dir_for_task: Optional[str] = None
+        if current_settings.research_tool.save_dir:
+            save_dir_for_task = os.path.join(current_settings.research_tool.save_dir, task_id)
+            os.makedirs(save_dir_for_task, exist_ok=True)
+            logger.info(f"CLI Deep research save directory: {save_dir_for_task}")
+        logger.info(f"CLI Using max_windows: {current_max_parallel_browsers}")
 
         result_dict = await agent_instance.run(
             topic=research_task_str, task_id=task_id,
-            save_dir=save_dir_for_task, max_parallel_browsers=current_max_parallel_browsers
+            save_dir=save_dir_for_task, max_windows=current_max_parallel_browsers
         )
 
         report_file_path = result_dict.get("report_file_path")
@@ -291,7 +296,14 @@ def run_browser_agent(
 @app.command()
 def run_deep_research(
     research_task: str = typer.Argument(..., help="The topic or question for deep research."),
-    max_parallel_browsers: Optional[int] = typer.Option(None, "--max-parallel-browsers", "-p", help="Override max parallel browsers from settings.")
+    max_windows: Optional[int] = typer.Option(
+        None,
+        "--max-windows",
+        "-w",
+        "--max-parallel-browsers",  # deprecated alias
+        "-p",  # deprecated alias
+        help="Override max windows from settings (applies to deep research). Alias: --max-parallel-browsers/-p (deprecated)",
+    )
 ):
     """Performs deep web research and prints the report."""
     if not cli_state.settings:
@@ -300,7 +312,7 @@ def run_deep_research(
 
     typer.secho(f"Executing deep research task: {research_task}", fg=typer.colors.GREEN)
     try:
-        result = asyncio.run(_run_deep_research_logic_cli(research_task, max_parallel_browsers, cli_state.settings))
+        result = asyncio.run(_run_deep_research_logic_cli(research_task, max_windows, cli_state.settings))
         typer.secho("\n--- Deep Research Final Report ---", fg=typer.colors.BLUE, bold=True)
         print(result)
     except Exception as e:

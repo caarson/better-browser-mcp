@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Union
+import os
 
 from pydantic import Field, SecretStr, field_validator, ValidationInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -86,8 +87,23 @@ class AgentToolSettings(BaseSettings):
 class DeepResearchToolSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="MCP_RESEARCH_TOOL_")
 
+    # Keep legacy config but expose a windows-oriented alias
     max_parallel_browsers: int = Field(default=1, env="MAX_PARALLEL_BROWSERS")
     save_dir: Optional[str] = Field(default=None, env="SAVE_DIR") # Base dir, task_id will be appended. Optional now.
+
+    @property
+    def max_windows(self) -> int:
+        """
+        Preferred windows-oriented cap. Reads MCP_RESEARCH_TOOL_MAX_WINDOWS if set; otherwise
+        falls back to the legacy max_parallel_browsers value.
+        """
+        v = os.getenv("MCP_RESEARCH_TOOL_MAX_WINDOWS")
+        if v is not None:
+            try:
+                return int(v)
+            except Exception:
+                pass
+        return self.max_parallel_browsers
 
 
 class PathSettings(BaseSettings):
