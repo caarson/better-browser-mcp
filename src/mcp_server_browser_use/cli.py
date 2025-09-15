@@ -216,7 +216,7 @@ async def _run_documentation_logic_cli(topic_str: str, current_settings: AppSett
         "then provide a concise, accurate summary with links and any critical code snippets.\n"
         "- Prefer official sources (e.g., oracle.com docs, javadoc.io, developer.mozilla.org, docs.python.org, docs.rs).\n"
         "- Use documentation-oriented actions when appropriate: doc_search, open_java_api_index, open_javadoc_io_search, "
-        "extract_main_content, fetch_java_doc_sections.\n"
+        "identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
         "- On search result pages that say 'Showing results for' with a 'Search instead for <literal>' link, click the exact-match link.\n"
         "- Keep a single window with minimal tabs. Avoid logins, avoid changing account settings.\n"
         "- When summarizing, include: page title, 1-3 key points, API signatures, and direct links (anchors) to sections.\n\n"

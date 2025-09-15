@@ -89,8 +89,27 @@ class CustomController(Controller):
             filters = []
             if site:
                 filters.append(f"site:{site}")
-            elif language and language.lower() == "java":
-                filters.append("(site:docs.oracle.com OR site:javadoc.io)")
+            elif language:
+                lang = language.lower().strip()
+                # Expand to common ecosystems
+                if lang in ("java",):
+                    filters.append("(site:docs.oracle.com OR site:javadoc.io)")
+                elif lang in ("js", "javascript", "web"):
+                    filters.append("site:developer.mozilla.org")
+                elif lang in ("python",):
+                    filters.append("(site:docs.python.org OR site:readthedocs.io)")
+                elif lang in ("rust",):
+                    filters.append("(site:docs.rs OR site:doc.rust-lang.org)")
+                elif lang in ("go", "golang"):
+                    filters.append("site:pkg.go.dev")
+                elif lang in ("node", "nodejs"):
+                    filters.append("site:nodejs.org/api")
+                elif lang in ("dotnet", ".net", "csharp", "c#"):
+                    filters.append("(site:learn.microsoft.com/en-us/dotnet/api OR site:learn.microsoft.com/en-us/aspnet)")
+                elif lang in ("kotlin",):
+                    filters.append("(site:kotlinlang.org/docs OR site:kotlinlang.org/api)")
+                elif lang in ("swift",):
+                    filters.append("site:developer.apple.com/documentation")
 
             filtered_query = f"{q} {' '.join(filters)}" if filters else q
             url = get_search_url(filtered_query)
@@ -238,6 +257,237 @@ class CustomController(Controller):
                 return ActionResult(extracted_content=json.dumps(data, ensure_ascii=False), include_in_memory=True)
             except Exception as e:
                 return ActionResult(error=f"fetch_java_doc_sections failed: {e}")
+
+        @self.registry.action(
+            "Identify the documentation profile for the current page based on the URL/domain."
+        )
+        async def identify_doc_profile(browser: BrowserContext):
+            try:
+                pw_ctx = getattr(browser, 'playwright_context', None)
+                if not pw_ctx:
+                    return ActionResult(error="Playwright context missing")
+                pages = getattr(pw_ctx, 'pages', None) or []
+                if not pages:
+                    return ActionResult(error="No open pages")
+                page = pages[-1]
+                url = getattr(page, 'url', '') or ''
+
+                profile = "generic"
+                if "developer.mozilla.org" in url:
+                    profile = "mdn"
+                elif "docs.python.org" in url:
+                    profile = "python_docs"
+                elif "readthedocs.io" in url or "readthedocs" in url:
+                    profile = "readthedocs"
+                elif "docs.rs" in url or "doc.rust-lang.org" in url:
+                    profile = "rust_docs"
+                elif "pkg.go.dev" in url:
+                    profile = "go_pkg"
+                elif "nodejs.org" in url and "/api" in url:
+                    profile = "node_api"
+                elif "learn.microsoft.com" in url and "/dotnet/" in url:
+                    profile = "dotnet_api"
+                elif "docs.oracle.com" in url or "javadoc.io" in url:
+                    profile = "java_docs"
+                elif "developer.apple.com/documentation" in url:
+                    profile = "apple_docs"
+
+                payload = json.dumps({"url": url, "profile": profile}, ensure_ascii=False)
+                return ActionResult(extracted_content=payload, include_in_memory=True)
+            except Exception as e:
+                return ActionResult(error=f"identify_doc_profile failed: {e}")
+
+        @self.registry.action(
+            "Auto-detect the documentation site and extract structured sections (headings, API items, anchors, and main content)."
+        )
+        async def fetch_doc_sections_auto(browser: BrowserContext, max_items: int = 200, include_html: bool = False):
+            try:
+                pw_ctx = getattr(browser, 'playwright_context', None)
+                if not pw_ctx:
+                    return ActionResult(error="Playwright context missing")
+                pages = getattr(pw_ctx, 'pages', None) or []
+                if not pages:
+                    return ActionResult(error="No open pages")
+                page = pages[-1]
+                url = getattr(page, 'url', '') or ''
+
+                async def _text(sel: str) -> str:
+                    try:
+                        el = await page.query_selector(sel)
+                        if not el:
+                            return ""
+                        return (await el.inner_text()).strip()
+                    except Exception:
+                        return ""
+
+                async def _collect_text(selectors: list[str], per: int = 50, with_href: bool = True) -> list[dict[str, str]]:
+                    acc: list[dict[str, str]] = []
+                    for sel in selectors:
+                        try:
+                            els = await page.query_selector_all(sel)
+                            for el in els:
+                                if len(acc) >= int(per):
+                                    break
+                                try:
+                                    txt = (await el.inner_text()).strip()
+                                    item: dict[str, str] = {"text": txt}
+                                    if with_href:
+                                        href = await el.get_attribute('href')
+                                        if href:
+                                            item["href"] = href
+                                    acc.append(item)
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+                    return acc
+
+                async def _collect_code(selectors: list[str], per: int = 50) -> list[str]:
+                    acc: list[str] = []
+                    for sel in selectors:
+                        try:
+                            els = await page.query_selector_all(sel)
+                            for el in els:
+                                if len(acc) >= int(per):
+                                    break
+                                try:
+                                    code = await el.inner_text()
+                                    if code and code.strip():
+                                        acc.append(code.strip())
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+                    return acc
+
+                # Profile-specific extractors
+                async def _extract_mdn() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("main h1, article h1, h1#content") ,
+                        "headings": await _collect_text(["main h2, main h3, article h2, article h3"] , per=max_items),
+                        "toc": await _collect_text(["nav.toc a, aside nav a"], per=max_items),
+                        "code": await _collect_code(["pre code, code.hljs"], per=50),
+                    }
+
+                async def _extract_python_docs() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text(".document h1, #content h1, h1"),
+                        "headings": await _collect_text([".document h2, .document h3, #content h2, #content h3"], per=max_items),
+                        "toc": await _collect_text([".toc-tree a, .toctree-wrapper a, nav.bd-toc a, .sphinxsidebarwrapper a"], per=max_items),
+                        "api_symbols": await _collect_text(["dl.class dt.sig a, dl.function dt.sig a, dt.sig a.reference"], per=max_items),
+                        "code": await _collect_code(["div.highlight pre, pre code"], per=50),
+                    }
+
+                async def _extract_readthedocs() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text(".document h1, #content h1, h1"),
+                        "headings": await _collect_text([".document h2, .document h3, #content h2, #content h3"], per=max_items),
+                        "toc": await _collect_text(["nav.bd-toc a, .sphinxsidebar a, .wy-menu a, .toc-tree a"], per=max_items),
+                        "code": await _collect_code(["div.highlight pre, pre code"], per=50),
+                    }
+
+                async def _extract_rust_docs() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("main h1, .fqn"),
+                        "headings": await _collect_text(["main h2, main h3"], per=max_items),
+                        "api_symbols": await _collect_text([".sidebar a.struct, .sidebar a.enum, .sidebar a.fn, .sidebar a.trait, .sidebar a.type"], per=max_items),
+                        "code": await _collect_code(["pre code, code.hljs"], per=50),
+                    }
+
+                async def _extract_go_pkg() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("h1, #pkg-overview h1"),
+                        "headings": await _collect_text(["#pkg-overview h2, #pkg-index h2, #pkg-functions h2, #pkg-types h2, main h2, main h3"], per=max_items),
+                        "api_symbols": await _collect_text(["#pkg-index a, #pkg-functions a, #pkg-types a"], per=max_items),
+                        "code": await _collect_code(["pre, pre code, .Code code"], per=50),
+                    }
+
+                async def _extract_node_api() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("main h1, .content h1, h1"),
+                        "headings": await _collect_text(["main h2, main h3, .content h2, .content h3"], per=max_items),
+                        "toc": await _collect_text(["nav.toc a, .toc a"], per=max_items),
+                        "api_symbols": await _collect_text([".toc a[href*='#']"], per=max_items),
+                        "code": await _collect_code(["pre code"], per=50),
+                    }
+
+                async def _extract_dotnet_api() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("article h1, h1"),
+                        "headings": await _collect_text(["article h2, article h3"], per=max_items),
+                        "toc": await _collect_text(["nav#affixed-left-container a, nav[aria-label='Table of contents'] a"], per=max_items),
+                        "api_symbols": await _collect_text(["table a.symbol, .summary a, article a[href*='#']"], per=max_items),
+                        "code": await _collect_code(["pre code, code.hljs"], per=50),
+                    }
+
+                async def _extract_java_docs() -> dict[str, object]:
+                    # Reuse the java-specific selectors by calling the other action internally
+                    try:
+                        # emulate a call to fetch_java_doc_sections
+                        res = await fetch_java_doc_sections(browser)  # type: ignore
+                        if isinstance(res, ActionResult) and res.extracted_content:
+                            return json.loads(res.extracted_content)
+                    except Exception:
+                        pass
+                    # Fallback to generic if something goes wrong
+                    return {}
+
+                async def _extract_apple_docs() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("main h1, .documentation .title, h1"),
+                        "headings": await _collect_text(["main h2, main h3, .documentation h2, .documentation h3"], per=max_items),
+                        "toc": await _collect_text(["nav a[href*='#']"], per=max_items),
+                        "code": await _collect_code(["pre code, code.hljs"], per=50),
+                    }
+
+                async def _extract_generic() -> dict[str, object]:
+                    return {
+                        "page_title": await page.title(),
+                        "header_title": await _text("h1"),
+                        "headings": await _collect_text(["h2, h3"], per=max_items),
+                        "toc": await _collect_text(["nav a, aside a"], per=max_items),
+                        "code": await _collect_code(["pre code"], per=50),
+                    }
+
+                # Decide profile
+                profile = "generic"
+                extractor = _extract_generic
+                if "developer.mozilla.org" in url:
+                    profile, extractor = "mdn", _extract_mdn
+                elif "docs.python.org" in url:
+                    profile, extractor = "python_docs", _extract_python_docs
+                elif "readthedocs.io" in url or "readthedocs" in url:
+                    profile, extractor = "readthedocs", _extract_readthedocs
+                elif "docs.rs" in url or "doc.rust-lang.org" in url:
+                    profile, extractor = "rust_docs", _extract_rust_docs
+                elif "pkg.go.dev" in url:
+                    profile, extractor = "go_pkg", _extract_go_pkg
+                elif "nodejs.org" in url and "/api" in url:
+                    profile, extractor = "node_api", _extract_node_api
+                elif "learn.microsoft.com" in url and "/dotnet/" in url:
+                    profile, extractor = "dotnet_api", _extract_dotnet_api
+                elif "docs.oracle.com" in url or "javadoc.io" in url:
+                    profile, extractor = "java_docs", _extract_java_docs
+                elif "developer.apple.com/documentation" in url:
+                    profile, extractor = "apple_docs", _extract_apple_docs
+
+                data = await extractor()
+                payload = json.dumps({
+                    "url": url,
+                    "profile": profile,
+                    "data": data
+                }, ensure_ascii=False)
+                return ActionResult(extracted_content=payload, include_in_memory=True)
+            except Exception as e:
+                return ActionResult(error=f"fetch_doc_sections_auto failed: {e}")
 
         @self.registry.action(
             "Fetch elements from the current page via CSS selectors and return their text or HTML."

@@ -28,246 +28,137 @@ This is an upgraded fork of the original project:
 Everything you expect from the original—plus pragmatic upgrades:
 
 - Unified tool: `run_research` with modes `auto | task | research | documentation | deep_research` (auto chooses the lightest viable path).
-- Smarter resource use: favors single-window tasks; deep research defaults to 1 parallel browser (configurable).
-- Search engine control: default Bing; supports DuckDuckGo, Brave, Google, or a custom engine template.
-1.  **`run_auto`**
-  *   **Description:** Auto-selects between `task`, `research`, and `deep_research` using the same heuristics as `run_research(mode="auto")`.
-  *   **Arguments:**
-    *   `topic_or_task` (string, required): The prompt describing the task or research topic.
-    *   `max_windows` (integer, optional): Upper bound on how many browser windows can be used in parallel (only applied when deep research is selected).
-  *   **Returns:** (string) Final result or research report string.
-### The Essentials
-2.  **`run_research`**
-     `uvx --from mcp-server-browser-use@latest python -m playwright install`
+<img src="./assets/better-browser-mcp-banner.png" alt="Better MCP Browser-Use banner" width="100%" />
 
-### Integration Patterns
+# Better MCP Browser-Use
 
-    *   `max_windows` (integer, optional): Upper bound on how many browser windows can be used in parallel (only applied when deep research is selected).
+Lightweight MCP server for practical browser automation and web research. Single-window, tabs-only concurrency. Smarter search control. Documentation-first mode.
+
+— Fork of https://github.com/Saik0s/mcp-browser-use with focused UX and config improvements.
+
+## Quick start
+
+1) Install Playwright browsers (one-time):
+
+```powershell
+$uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "uvx" };
+& $uvx --from git+https://github.com/caarson/mcp-browser-use@main python -m playwright install
+```
+
+2) Run the server:
+
+```powershell
+$env:MCP_SERVER_LOGGING_LEVEL = "INFO"
+$env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"
+$uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "uvx" };
+& $uvx --from git+https://github.com/caarson/mcp-browser-use@main mcp-server-browser-use
+```
+
+3) Minimal MCP client config (example):
 
 ```json
-// Example 1A: Use GitHub fork (preferred while PR pending)
-"mcpServers": {
-  "browser-use": {
-    "command": "uvx",
-    "args": ["--from", "git+https://github.com/caarson/mcp-browser-use", "mcp-server-browser-use"],
-    "env": {
-      "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY_HERE_IF_USING_GOOGLE",
-      "MCP_LLM_PROVIDER": "google",
-      "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
-      "MCP_BROWSER_HEADLESS": "true"
+{
+  "mcpServers": {
+    "browser-use": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/caarson/mcp-browser-use", "mcp-server-browser-use"],
+      "env": {
+        "MCP_LLM_PROVIDER": "google",
+        "MCP_LLM_GOOGLE_API_KEY": "YOUR_KEY",
+        "MCP_LLM_MODEL_NAME": "gemini-2.5-flash-preview-04-17",
+        "MCP_BROWSER_HEADLESS": "true"
+      }
     }
   }
 }
 ```
 
-```json
-// Example 1B: One-Line Latest Version (PyPI)
-"mcpServers": {
-    "browser-use": {
-      "command": "uvx",
-      "args": ["mcp-server-browser-use@latest"],
-    }
-}
-```
+## Tools (MCP)
 
+- `run_research(topic_or_task, mode=auto|task|research|documentation|deep_research, max_windows?)` — unified entrypoint.
+- `run_documentation(topic_or_task)` — documentation-focused convenience.
+- `run_auto(topic_or_task)` — equivalent to `run_research(..., mode=auto)`.
+- `run_task(task)` — router favoring light tasks.
+- `run_deep_research(research_task, max_windows?)` — heavy pipeline.
 
-```json
+Tip: Prefer `run_research` and set `mode` per need. Use `documentation` for official docs/API summaries with anchors and code.
 
-> Note: The standalone `run_browser_agent` MCP tool has been removed. Use `run_research` with `mode=task` (for UI actions) or `mode=research` (for lightweight reading/summarization). The heavy pipeline remains available as `run_deep_research`.
-// Example 2: Advanced Configuration with CDP
-"mcpServers": {
-    "browser-use": {
-      "command": "uvx",
-      "args": ["mcp-server-browser-use@latest"],
-      "env": {
-        "MCP_LLM_OPENROUTER_API_KEY": "YOUR_KEY_HERE_IF_USING_OPENROUTER",
-        "MCP_LLM_PROVIDER": "openrouter",
-        "MCP_LLM_MODEL_NAME": "anthropic/claude-3.5-haiku",
-        "MCP_LLM_TEMPERATURE": "0.4",
+## Configuration (env vars)
 
-        "MCP_BROWSER_HEADLESS": "false",
-        "MCP_BROWSER_WINDOW_WIDTH": "1440",
-        "MCP_BROWSER_WINDOW_HEIGHT": "1080",
-        "MCP_AGENT_TOOL_USE_VISION": "true",
+Set via .env or your MCP client’s `env` block. Key groups:
 
-        "MCP_RESEARCH_TOOL_SAVE_DIR": "/path/to/your/research",
-  "MCP_RESEARCH_TOOL_MAX_WINDOWS": "5",
+- LLM (`MCP_LLM_`)
+  - `PROVIDER` (google|openai|anthropic|azure_openai|mistral|openrouter|ollama|…)
+  - `MODEL_NAME`, `TEMPERATURE`, `BASE_URL`, `API_KEY`
+  - Provider keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `AZURE_OPENAI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, etc.
+  - Endpoints: `OPENAI_ENDPOINT`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `OLLAMA_ENDPOINT`, `OPENROUTER_ENDPOINT`, …
+  - Planner (optional): `PLANNER_PROVIDER`, `PLANNER_MODEL_NAME`, `PLANNER_TEMPERATURE`, `PLANNER_BASE_URL`, `PLANNER_API_KEY`
 
-        "MCP_PATHS_DOWNLOADS": "/path/to/your/downloads",
+- Browser (`MCP_BROWSER_`)
+  - `HEADLESS`, `DISABLE_SECURITY`, `BINARY_PATH`, `USER_DATA_DIR`, `WINDOW_WIDTH`, `WINDOW_HEIGHT`
+  - CDP reuse: `USE_OWN_BROWSER`, `CDP_URL`, `WSS_URL`
+  - Lifecycle/trace: `KEEP_OPEN`, `TRACE_PATH`
 
-        "MCP_BROWSER_USE_OWN_BROWSER": "true",
-        "MCP_BROWSER_CDP_URL": "http://localhost:9222",
+- Agent tool (`MCP_AGENT_TOOL_`)
+  - `MAX_STEPS`, `MAX_ACTIONS_PER_STEP`, `TOOL_CALLING_METHOD`, `MAX_INPUT_TOKENS`, `USE_VISION`
+  - Overrides: `HEADLESS`, `DISABLE_SECURITY`
+  - Recording/history: `ENABLE_RECORDING`, `SAVE_RECORDING_PATH`, `HISTORY_PATH`
 
-        "MCP_AGENT_TOOL_HISTORY_PATH": "/path/to/your/history",
+- Research (`MCP_RESEARCH_TOOL_`)
+  - `SAVE_DIR` (base folder for outputs)
+  - Concurrency cap: `MAX_WINDOWS` (preferred), or legacy `MAX_PARALLEL_BROWSERS`
 
-        "MCP_SERVER_LOGGING_LEVEL": "DEBUG",
-        "MCP_SERVER_LOG_FILE": "/path/to/your/log/mcp_server_browser_use.log",
-      }
-    }
-}
-```
+- Paths (`MCP_PATHS_`)
+  - `DOWNLOADS`
 
-```json
-// Example 3: Advanced Configuration with User Data and custom chrome path
-"mcpServers": {
-    "browser-use": {
-      "command": "uvx",
-      "args": ["mcp-server-browser-use@latest"],
-      "env": {
-        "MCP_LLM_OPENAI_API_KEY": "YOUR_KEY_HERE_IF_USING_OPENAI",
-        "MCP_LLM_PROVIDER": "openai",
-        "MCP_LLM_MODEL_NAME": "gpt-4.1-mini",
-        "MCP_LLM_TEMPERATURE": "0.2",
+- Server (`MCP_SERVER_`)
+  - `LOGGING_LEVEL` (DEBUG|INFO|WARNING|ERROR), `LOG_FILE`, `ANONYMIZED_TELEMETRY`
+  - `MCP_CONFIG` (JSON) to expose additional MCP tools inside the browser agent
 
-        "MCP_BROWSER_HEADLESS": "false",
+- Search control (standalone)
+  - `MCP_SEARCH_ENGINE` (bing|ddg|brave|google|custom)
+  - `MCP_BLOCK_GOOGLE` (true|false)
+  - For `custom`: `MCP_SEARCH_URL_TEMPLATE` or `MCP_SEARCH_ENGINE_URL` + `MCP_SEARCH_QUERY_PARAM`
 
-        "MCP_BROWSER_BINARY_PATH": "/path/to/your/chrome/binary",
-        "MCP_BROWSER_USER_DATA_DIR": "/path/to/your/user/data",
-        "MCP_BROWSER_DISABLE_SECURITY": "true",
-        "MCP_BROWSER_KEEP_OPEN": "true",
-        "MCP_BROWSER_TRACE_PATH": "/path/to/your/trace",
-
-        "MCP_AGENT_TOOL_HISTORY_PATH": "/path/to/your/history",
-
-        "MCP_SERVER_LOGGING_LEVEL": "DEBUG",
-        "MCP_SERVER_LOG_FILE": "/path/to/your/log/mcp_server_browser_use.log",
-      }
-    }
-}
-```
-
-```json
-// Example 4: Local Development Flow (clone and run locally)
-"mcpServers": {
-    "browser-use": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/your/dev/path",
-        "run",
-        "mcp-server-browser-use"
-      ],
-      "env": {
-        "MCP_LLM_OPENROUTER_API_KEY": "YOUR_KEY_HERE_IF_USING_OPENROUTER",
-      > Note: The standalone `run_browser_agent` MCP tool has been removed. Use `run_research` with `mode=auto` (default), `mode=task` (UI actions), or `mode=research` (lightweight reading/summarization). The heavy pipeline remains available as `run_deep_research`.
-        "MCP_LLM_PROVIDER": "openrouter",
-        "MCP_LLM_MODEL_NAME": "openai/gpt-4o-mini",
-        "MCP_BROWSER_HEADLESS": "true",
-      }
-    }
-}
-```
-
-**Tip:** Start simple (Example 1). Use `.env` to opt into specific features later.
-
-## MCP Tools
-
-This server exposes the following tools via the Model Context Protocol:
-
-### Synchronous Tools (Wait for Completion)
-
-1.  **`run_auto`**
-  *   **Description:** Auto-selects between `task`, `research`, and `deep_research` using routing heuristics.
-  *   **Arguments:**
-    *   `topic_or_task` (string, required): The prompt describing the task or research topic.
-    *   `max_windows` (integer, optional): Upper bound on parallel windows if deep research is chosen.
-  *   **Returns:** (string) Final result or research report string.
-
-2.  **`run_research`**
-  *   **Description:** Unified entrypoint with modes to handle both browsing tasks and research.
-  *   **Arguments:**
-    *   `topic_or_task` (string, required): The prompt describing the task or research topic.
-    *   `mode` (string, optional): `auto` (default), `task`, `research`, `documentation`, or `deep_research`.
-    *   `max_windows` (integer, optional): Only used when `deep_research` is selected.
-  *   **Returns:** (string) Final result or research report string.
-  *   **Env override:** `MCP_RESEARCH_MODE=auto|task|research|documentation|deep_research` (default: `auto`).
-
-3.  **`run_task`**
-  *   **Description:** Smart router that prefers the lightweight task flow and only escalates to deep research when needed. Controlled by `MCP_TASK_ROUTER_MODE`.
-  *   **Arguments:**
-    *   `task` (string, required): The primary task or objective.
-    *   `max_windows` (integer, optional): Passed through if deep research is chosen to cap parallel windows.
-  *   **Returns:** (string) The final result or deep research report string.
-
-4.  **`run_deep_research`**
-    *   **Description:** Performs in-depth web research on a topic, generates a report, and waits for completion. Uses settings from `MCP_RESEARCH_TOOL_*`, `MCP_LLM_*`, and `MCP_BROWSER_*` environment variables. If `MCP_RESEARCH_TOOL_SAVE_DIR` is set, outputs are saved to a subdirectory within it; otherwise, operates in memory-only mode.
-    *   **Arguments:**
-    *   `research_task` (string, required): The topic or question for the research.
-  *   `max_windows` (integer, optional): Overrides `MCP_RESEARCH_TOOL_MAX_WINDOWS` from environment (caps simultaneous windows used by sub-agents).
-    *   **Returns:** (string) The generated research report in Markdown format, including the file path (if saved), or an error message.
-
-## CLI Usage
-
-This package also provides a command-line interface `mcp-browser-cli` for direct testing and scripting.
-
-**Global Options:**
-*   `--env-file PATH, -e PATH`: Path to a `.env` file to load configurations from.
-*   `--log-level LEVEL, -l LEVEL`: Override the logging level (e.g., `DEBUG`, `INFO`).
-
-**Commands:**
-
-1.  **`mcp-browser-cli run-browser-agent [OPTIONS] TASK`**
-    *   **Description:** Runs a browser agent task.
-    *   **Arguments:**
-        *   `TASK` (string, required): The primary task for the agent.
-    *   **Example:**
-        ```bash
-  mcp-browser-cli run-browser-agent "Go to example.com and find the title." -e .env
-        ```
-
-2.  **`mcp-browser-cli run-deep-research [OPTIONS] RESEARCH_TASK`**
-    *   **Description:** Performs deep web research.
-    *   **Arguments:**
-        *   `RESEARCH_TASK` (string, required): The topic or question for research.
-    *   **Options:**
-  *   `--max-windows INTEGER, -w INTEGER`: Override `MCP_RESEARCH_TOOL_MAX_WINDOWS`.
-    *   **Example:**
-        ```bash
-  mcp-browser-cli run-deep-research "What are the latest advancements in AI-driven browser automation?" --max-windows 5 -e .env
-        ```
-
-3.  **`mcp-browser-cli run-documentation TOPIC`**
-  *   **Description:** Documentation-focused navigation and summarization. Prefers official docs and API references.
-  *   **Arguments:**
-    *   `TOPIC` (string, required): The doc query, class/method to look up, or concept to read about.
-  *   **Example:**
-    ```powershell
-    mcp-browser-cli run-documentation "java.lang.String#format" -e .env
-    ```
-
-All other configurations (LLM keys, paths, browser settings) are picked up from environment variables (or the specified `.env` file) as detailed in the Configuration section.
-
-### Router behavior (run_task)
-
-`run_task` chooses between a lightweight internal browser agent and `run_deep_research` (heavy). It favors single-window direct completion for tasks like opening GitHub, documentation, or a single README. It escalates only when the prompt clearly indicates multi-source synthesis, investigation/troubleshooting, or when the agent hits blockers.
-
-Control routing with:
+## Sample .env
 
 ```dotenv
-# Router mode: auto | always-task | always-research
-MCP_TASK_ROUTER_MODE=auto
+# LLM
+MCP_LLM_PROVIDER=google
+MCP_LLM_GOOGLE_API_KEY=YOUR_KEY
+MCP_LLM_MODEL_NAME=gemini-2.5-flash-preview-04-17
+MCP_LLM_TEMPERATURE=0.0
+
+# Browser
+MCP_BROWSER_HEADLESS=true
+MCP_BROWSER_KEEP_OPEN=true
+
+# Research
+MCP_RESEARCH_TOOL_SAVE_DIR=./research-out
+MCP_RESEARCH_TOOL_MAX_WINDOWS=1
+
+# Search
+MCP_SEARCH_ENGINE=bing
+MCP_BLOCK_GOOGLE=false
+
+# Server
+MCP_SERVER_LOGGING_LEVEL=INFO
 ```
 
-In auto mode, the router uses simple heuristics (keywords for simple navigation vs. complex analysis) and prompt length to decide.
+## Troubleshooting
 
-### Unified behavior (run_research)
+- Exit Code 1 starting the server:
+  - Ensure Playwright browsers installed (see Quick start step 1).
+  - Set a valid `MCP_RESEARCH_TOOL_SAVE_DIR`.
+  - Temporarily set `MCP_SERVER_LOGGING_LEVEL=DEBUG` and re-run to capture logs.
 
-`run_research` adds an explicit `mode` control:
+## License
 
-- `auto` (default): decide between `task`, `research`, and `deep_research`.
-- `task`: treat as a concrete UI workflow (e.g., Cloudflare DNS, dashboards, consoles). Uses a single-window bias and acts directly.
-- `research`: lightweight reading/summarization using the browser agent with source links; avoids logins/settings changes.
-- `deep_research`: invokes the heavier multi-source pipeline.
+MIT — see LICENSE.
 
-Env override for default: `MCP_RESEARCH_MODE=auto|task|research|deep_research`.
-
-## Configuration (Environment Variables)
-
-You can configure everything via env vars or a `.env` file. Highlights of the most relevant settings:
-
-- LLM: `MCP_LLM_PROVIDER`, `MCP_LLM_MODEL_NAME`, provider-specific API keys.
-- Browser: `MCP_BROWSER_HEADLESS`, `MCP_BROWSER_USE_OWN_BROWSER`, `MCP_BROWSER_CDP_URL`, `MCP_BROWSER_KEEP_OPEN`.
-- Agent: `MCP_AGENT_TOOL_MAX_STEPS`, `MCP_AGENT_TOOL_USE_VISION`, `MCP_AGENT_TOOL_HISTORY_PATH`.
+<p align="center">
+  <img src="./assets/better-browser-mcp-logo.png" alt="logo" width="120" />
+</p>
 - Deep Research: `MCP_RESEARCH_TOOL_SAVE_DIR`, `MCP_RESEARCH_TOOL_MAX_WINDOWS` (default: 1 here). Legacy alias supported: `MCP_RESEARCH_TOOL_MAX_PARALLEL_BROWSERS`.
 - Router: `MCP_TASK_ROUTER_MODE=auto|always-task|always-research`.
 - Unified mode: `MCP_RESEARCH_MODE=auto|task|research|deep_research`.
