@@ -220,7 +220,9 @@ async def _run_documentation_logic_cli(topic_str: str, current_settings: AppSett
         "- Use documentation actions when appropriate: doc_search, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
         "- On search pages showing 'Showing results for' with 'Search instead for <literal>', click the exact-match link.\n"
         "- Keep a single window with minimal tabs. Avoid logins or account changes.\n"
-        "- Before reading a specific page, get a quick orientation: what the page covers and which sections matter for the task.\n"
+        "- After landing on a doc page: scroll 2–3 times to reveal content; then run identify_doc_profile.\n"
+        "  If profile=java_docs, use fetch_java_doc_sections; otherwise use fetch_doc_sections_auto and/or extract_main_content.\n"
+        "  On Oracle Java API index pages, navigate via Packages/Classes links to the relevant class or method section before summarizing.\n"
         "- Efficiency: Perform at most 1–3 searches, then focus on reading the most relevant doc page.\n"
         "- Completion: When done, CALL THE 'done' ACTION with a FINAL SUMMARY including: page title, 1–3 key points, relevant API signatures, and direct links (anchors).\n\n"
     )

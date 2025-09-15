@@ -512,7 +512,8 @@ def serve() -> FastMCP:
                 "- Use doc actions when appropriate: doc_search, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections.\n"
                 "- On search result pages that say 'Showing results for' and offer 'Search instead for <literal>', click the exact-match link.\n"
                 "- Keep a single window; open at most one extra tab for search when needed, then return to the main doc tab. Avoid logins or account changes.\n"
-                "- Before diving into a specific page, orient: what the page covers, and which sections matter for the task.\n"
+                "- After landing on a doc page: scroll 2–3 times to reveal content; then run identify_doc_profile. If profile=java_docs, use fetch_java_doc_sections; otherwise use fetch_doc_sections_auto and/or extract_main_content.\n"
+                "  On Oracle Java API index pages, navigate via Packages/Classes links to the relevant class or method section before summarizing.\n"
                 "- Finish with a FINAL SUMMARY containing: page title, 1–3 key points, relevant API signatures, and direct links (anchors) to sections.\n\n"
             )
         else:  # research

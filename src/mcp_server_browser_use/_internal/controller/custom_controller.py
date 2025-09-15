@@ -383,7 +383,13 @@ class CustomController(Controller):
                                 try:
                                     txt = (await el.inner_text()).strip()
                                     href = await el.get_attribute('href')
-                                    acc.append({"text": txt, **({"href": href} if href else {})})
+                                    abs_href = None
+                                    if href:
+                                        try:
+                                            abs_href = await page.evaluate('(h) => new URL(h, window.location.href).href', href)
+                                        except Exception:
+                                            abs_href = href
+                                    acc.append({"text": txt, **({"href": abs_href} if abs_href else {})})
                                 except Exception:
                                     continue
                         except Exception:
@@ -481,7 +487,11 @@ class CustomController(Controller):
                                     if with_href:
                                         href = await el.get_attribute('href')
                                         if href:
-                                            item["href"] = href
+                                            try:
+                                                abs_href = await page.evaluate('(h) => new URL(h, window.location.href).href', href)
+                                            except Exception:
+                                                abs_href = href
+                                            item["href"] = abs_href
                                     acc.append(item)
                                 except Exception:
                                     continue
