@@ -181,33 +181,7 @@ class CustomController(Controller):
         )
         async def doc_orient_and_extract(query: str, browser: BrowserContext, language: str | None = None, site: str | None = None, scroll_times: int = 3):
             try:
-                ql = (query or "").lower()
-                # Fast path for Spigot/Bukkit/Paper: open known official Javadocs index directly
-                if any(k in ql for k in ("spigot", "bukkit", "papermc")):
-                    try:
-                        await self._set_overlay(browser, "opening doc…")
-                        _ = await open_spigot_javadocs_index(browser=browser)
-                        try:
-                            await asyncio.sleep(0.3)
-                        except Exception:
-                            pass
-                        await self._set_overlay(browser, "scrolling…")
-                        _ = await self.registry.execute_action("scroll_down", {"times": int(scroll_times)}, browser=browser, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
-                        await self._set_overlay(browser, "profiling…")
-                        prof = await identify_doc_profile(browser=browser)
-                        await self._set_overlay(browser, "reading content…")
-                        ext = await fetch_doc_sections_auto(browser=browser, max_items=200, include_html=False)
-                        payload = json.dumps({
-                            "query": query,
-                            "profile": (json.loads(prof.extracted_content) if isinstance(prof, ActionResult) and prof.extracted_content else {}),
-                            "extracted": (json.loads(ext.extracted_content) if isinstance(ext, ActionResult) and ext.extracted_content else {}),
-                        }, ensure_ascii=False)
-                        # Keep overlay showing last action
-                        return ActionResult(extracted_content=payload, include_in_memory=True)
-                    except Exception:
-                        # Fall through to generic doc search path on failure
-                        # Keep overlay showing last action
-                        pass
+                # Generalized flow only: no hardcoded domain fast paths
                 await self._set_overlay(browser, "researching…")
                 # 1) Search
                 res1 = await doc_search(query=query, browser=browser, language=language, site=site, new_tab=False)
@@ -285,7 +259,6 @@ class CustomController(Controller):
                 default_allowed = {
                     "docs.oracle.com",
                     "javadoc.io",
-                    "hub.spigotmc.org",
                     "developer.mozilla.org",
                     "docs.python.org",
                     "docs.rs",
@@ -334,60 +307,67 @@ class CustomController(Controller):
                         return s
                     return 0
 
-                # Wait briefly for search results to render; prefer allowed-domain anchors
+                # Short delay for SERP render
                 try:
-                    await page.wait_for_timeout(250)  # minimal delay to allow first paint
+                    await page.wait_for_timeout(250)
                 except Exception:
                     pass
 
-                # Build an allowed-domain selector for fast-path matching on search engines
-                allowed_domain_list = [
-                    "docs.oracle.com",
-                    "javadoc.io",
-                    "hub.spigotmc.org",
-                    "developer.mozilla.org",
-                    "docs.python.org",
-                    "docs.rs",
-                    "doc.rust-lang.org",
-                    "pkg.go.dev",
-                    "nodejs.org",
-                    "learn.microsoft.com",
-                    "developer.apple.com",
-                    "kotlinlang.org",
-                    "readthedocs.io",
-                    "dev.java",
-                    "docs.gradle.org",
-                    "docs.spring.io",
-                ]
-                if allowed_sites:
-                    for s in allowed_sites:
-                        if s and isinstance(s, str):
-                            allowed_domain_list.append(s.strip().lower())
+                # Detect search engine
+                current_url = getattr(page, 'url', '') or ''
+                engine = "generic"
+                if "search.brave.com" in current_url:
+                    engine = "brave"
+                elif "bing.com/search" in current_url:
+                    engine = "bing"
+                elif "duckduckgo.com/" in current_url:
+                    engine = "ddg"
+                elif "google." in current_url:
+                    engine = "google"
 
-                domain_css = ", ".join([f"a[href*='{d}']" for d in allowed_domain_list])
+                # Engine-aware selectors (minimal profiles)
+                engine_selectors = {
+                    "brave": [
+                        "a.result-header",
+                        "a[href].search-result-heading",
+                        "a[href].snippet-title",
+                        "a[href]",
+                    ],
+                    "bing": [
+                        "li.b_algo h2 a",
+                        "li.b_algo a[href]",
+                        "a[href]",
+                    ],
+                    "ddg": [
+                        "a.result__a",
+                        "article a[href]",
+                        "a[href]",
+                    ],
+                    "google": [
+                        "div.yuRUbf > a",
+                        "a[href]:has(h3)",
+                        "a[jsname][href]",
+                        "a[href]",
+                    ],
+                    "generic": [
+                        "a[href]"
+                    ]
+                }
+
                 anchors = []
-                # Try a few short retries to catch dynamically loaded results (e.g., Brave search)
-                for _ in range(6):  # ~6 * 700ms ≈ 4.2s max
+                selectors_to_try = engine_selectors.get(engine, engine_selectors["generic"]) + engine_selectors["generic"]
+                seen = set()
+                for sel in selectors_to_try:
                     try:
-                        if domain_css:
-                            # Prefer allowed-domain anchors if present
-                            dom_anchors = await page.query_selector_all(domain_css)
-                            if dom_anchors:
-                                anchors = dom_anchors
-                                break
+                        els = await page.query_selector_all(sel)
+                        for el in els or []:
+                            if el not in seen:
+                                anchors.append(el)
+                                seen.add(el)
+                        if anchors:
+                            break
                     except Exception:
-                        pass
-                    try:
-                        gen = await page.query_selector_all('a[href]')
-                        if gen:
-                            anchors = gen
-                    except Exception:
-                        pass
-                    # If none yet, wait a bit and retry
-                    try:
-                        await page.wait_for_timeout(700)
-                    except Exception:
-                        pass
+                        continue
                 from urllib.parse import urlparse, parse_qs
                 candidates: list[tuple[int, str]] = []  # (score, url)
 
@@ -655,10 +635,36 @@ class CustomController(Controller):
                     profile = "node_api"
                 elif "learn.microsoft.com" in url and "/dotnet/" in url:
                     profile = "dotnet_api"
-                elif "docs.oracle.com" in url or "javadoc.io" in url or "hub.spigotmc.org" in url:
+                elif "docs.oracle.com" in url or "javadoc.io" in url:
                     profile = "java_docs"
                 elif "developer.apple.com/documentation" in url:
                     profile = "apple_docs"
+
+                # Content-based heuristics (engine-agnostic) to detect Java docs even on non-Oracle domains
+                if profile == "generic":
+                    try:
+                        javadoc_selectors = [
+                            "#class-summary",
+                            "table.method-summary",
+                            "table.field-summary",
+                            ".memberSummary:has(> caption:has-text('Method Summary'))",
+                            ".memberSummary:has(> caption:has-text('Field Summary'))",
+                            "#constructor-summary",
+                            "#method-details, #field-details, #constructor-details",
+                        ]
+                        found = False
+                        for sel in javadoc_selectors:
+                            try:
+                                el = await page.query_selector(sel)
+                                if el:
+                                    found = True
+                                    break
+                            except Exception:
+                                continue
+                        if found:
+                            profile = "java_docs"
+                    except Exception:
+                        pass
 
                 payload = json.dumps({"url": url, "profile": profile}, ensure_ascii=False)
                 return ActionResult(extracted_content=payload, include_in_memory=True)
@@ -1064,10 +1070,6 @@ class CustomController(Controller):
                             logger.warning("search_google called without 'query'. Passing through.")
                         else:
                             q = str(query)
-                            ql = q.lower()
-                            # Prefer official docs for Spigot/Bukkit queries to avoid unrelated results
-                            if any(t in ql for t in ("spigot", "bukkit", "papermc", "spigotmc")) and "site:" not in ql:
-                                q = f"{q} (site:hub.spigotmc.org OR site:javadoc.io)"
                             engine = get_search_engine()
                             url = get_search_url(q)
                             logger.info(f"search_google -> engine='{engine}', navigating to: {url}")
