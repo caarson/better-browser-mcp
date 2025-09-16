@@ -45,8 +45,14 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
 ```
 
 Notes:
-- The overlay badge appears during actions (navigating, searching, extracting). It won’t show while idle between steps.
+- The overlay badge shows the most recent action (e.g., “opening page…”, “reading content…”) and now persists between steps so you can see the last activity while idle.
 - If you prefer Python directly, you can also run: `uv --directory . run python -m mcp_server_browser_use`.
+
+One-liner (local run from this repo):
+
+```powershell
+$env:MCP_SERVER_LOGGING_LEVEL = "INFO"; $env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"; uv --directory . run mcp-server-browser-use
+```
 
 3) Minimal MCP client config:
 

@@ -202,19 +202,17 @@ class CustomController(Controller):
                             "profile": (json.loads(prof.extracted_content) if isinstance(prof, ActionResult) and prof.extracted_content else {}),
                             "extracted": (json.loads(ext.extracted_content) if isinstance(ext, ActionResult) and ext.extracted_content else {}),
                         }, ensure_ascii=False)
-                        await self._set_overlay(browser, "")
+                        # Keep overlay showing last action
                         return ActionResult(extracted_content=payload, include_in_memory=True)
                     except Exception:
                         # Fall through to generic doc search path on failure
-                        try:
-                            await self._set_overlay(browser, "")
-                        except Exception:
-                            pass
+                        # Keep overlay showing last action
+                        pass
                 await self._set_overlay(browser, "researching…")
                 # 1) Search
                 res1 = await doc_search(query=query, browser=browser, language=language, site=site, new_tab=False)
                 if isinstance(res1, ActionResult) and res1.error:
-                    await self._set_overlay(browser, "")
+                    # Keep overlay showing last action
                     return res1
                 # 2) Click best doc-site result
                 await self._set_overlay(browser, "opening doc…")
@@ -252,13 +250,10 @@ class CustomController(Controller):
                     "profile": prof_payload,
                     "extracted": ext_payload,
                 }, ensure_ascii=False)
-                await self._set_overlay(browser, "")
+                # Keep overlay showing last action
                 return ActionResult(extracted_content=payload, include_in_memory=True)
             except Exception as e:
-                try:
-                    await self._set_overlay(browser, "")
-                except Exception:
-                    pass
+                # Keep overlay showing last action even on error
                 return ActionResult(error=f"doc_orient_and_extract failed: {e}")
 
         @self.registry.action(
@@ -553,13 +548,10 @@ class CustomController(Controller):
                         text = txt or ""
                     except Exception:
                         pass
-                await self._set_overlay(browser, "")
+                # Keep overlay showing last action
                 return ActionResult(extracted_content=text.strip(), include_in_memory=True)
             except Exception as e:
-                try:
-                    await self._set_overlay(browser, "")
-                except Exception:
-                    pass
+                # Keep overlay showing last action even on error
                 return ActionResult(error=f"extract_main_content failed: {e}")
 
         @self.registry.action(
@@ -628,16 +620,10 @@ class CustomController(Controller):
                 data["details"] = await _collect(["#method-details, #field-details, #constructor-details, .details"]) 
 
                 result = ActionResult(extracted_content=json.dumps(data, ensure_ascii=False), include_in_memory=True)
-                try:
-                    await self._set_overlay(browser, "")
-                except Exception:
-                    pass
+                # Keep overlay showing last action
                 return result
             except Exception as e:
-                try:
-                    await self._set_overlay(browser, "")
-                except Exception:
-                    pass
+                # Keep overlay showing last action even on error
                 return ActionResult(error=f"fetch_java_doc_sections failed: {e}")
 
         @self.registry.action(
@@ -873,16 +859,10 @@ class CustomController(Controller):
                     "data": data
                 }, ensure_ascii=False)
                 result = ActionResult(extracted_content=payload, include_in_memory=True)
-                try:
-                    await self._set_overlay(browser, "")
-                except Exception:
-                    pass
+                # Keep overlay showing last action
                 return result
             except Exception as e:
-                try:
-                    await self._set_overlay(browser, "")
-                except Exception:
-                    pass
+                # Keep overlay showing last action
                 return ActionResult(error=f"fetch_doc_sections_auto failed: {e}")
 
         @self.registry.action(
@@ -1124,11 +1104,9 @@ class CustomController(Controller):
                                 context=context,
                             )
                     finally:
-                        try:
-                            if browser_context:
-                                await self._set_overlay(browser_context, "")
-                        except Exception:
-                            pass
+                        # Do not clear the overlay here; keep showing the most recent action label
+                        # so users can see the last activity even while idle between steps.
+                        pass
 
                     if isinstance(result, str):
                         return ActionResult(extracted_content=result)
