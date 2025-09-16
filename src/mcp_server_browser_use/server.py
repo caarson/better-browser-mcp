@@ -193,6 +193,95 @@ async def get_browser_and_context() -> tuple[CustomBrowser, CustomBrowserContext
 def serve() -> FastMCP:
     server = FastMCP("mcp_server_browser_use")
 
+    async def _documentation_quick_pipeline(query: str) -> str:
+        """Open search → click best doc → scroll → extract → summarize via LLM. Returns a short report string."""
+        browser_instance: Optional[CustomBrowser] = None
+        context_instance: Optional[CustomBrowserContext] = None
+        controller_instance: Optional[CustomController] = None
+        closed = False
+        try:
+            async with resource_lock:
+                browser_instance, context_instance = await get_browser_and_context()
+                controller_instance = await get_controller(ask_human_callback=None)
+            if not context_instance or not controller_instance:
+                return "Error: could not acquire browser/controller for documentation pipeline."
+
+            # 1) Navigate to search results
+            url = get_search_url(query)
+            try:
+                await controller_instance.registry.execute_action(
+                    "go_to_url",
+                    {"url": url, "new_tab": False},
+                    browser=context_instance,
+                    page_extraction_llm=None,
+                    sensitive_data=None,
+                    available_file_paths=None,
+                    context=None,
+                )
+            except Exception as e:
+                logger.warning(f"Quick doc pipeline: navigation failed: {e}")
+
+            # 2) Try clicking a good doc link
+            try:
+                _ = await controller_instance.registry.execute_action("click_best_doc_result", {}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+            except Exception:
+                pass
+
+            # 3) Scroll a bit to reveal content
+            try:
+                _ = await controller_instance.registry.execute_action("scroll_down", {"times": 3}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+            except Exception:
+                pass
+
+            # 4) Extract sections
+            extracted_json: Optional[str] = None
+            try:
+                res = await controller_instance.registry.execute_action("fetch_doc_sections_auto", {"max_items": 200, "include_html": False}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+                if hasattr(res, "extracted_content") and res.extracted_content:
+                    extracted_json = str(res.extracted_content)
+            except Exception:
+                pass
+            if not extracted_json:
+                try:
+                    res2 = await controller_instance.registry.execute_action("extract_main_content", {}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+                    if hasattr(res2, "extracted_content") and res2.extracted_content:
+                        extracted_json = str(res2.extracted_content)
+                except Exception:
+                    pass
+
+            # 5) Summarize with LLM
+            try:
+                main_llm_config = settings.get_llm_config()
+                llm = internal_llm_provider.get_llm_model(**main_llm_config)
+                content_blob = extracted_json or ""
+                if len(content_blob) > 18000:
+                    content_blob = content_blob[:18000] + "\n… [truncated]"
+                from langchain_core.messages import SystemMessage, HumanMessage
+                messages = [
+                    SystemMessage(content=(
+                        "You are a documentation summarizer. Given a query and extracted sections from an official or authoritative documentation page, "
+                        "produce a concise summary with 3–6 bullet key points and 2–4 direct links (anchors) to relevant sections if present. "
+                        "Prefer API signatures and class/method names when available."
+                    )),
+                    HumanMessage(content=f"Query: {query}\n\nExtracted:\n{content_blob}")
+                ]
+                ai_msg = await llm.ainvoke(messages)
+                return ai_msg.content if getattr(ai_msg, "content", None) else str(ai_msg)
+            except Exception as e:
+                logger.error(f"Quick doc pipeline summarization failed: {e}")
+                return extracted_json or "No content extracted."
+        finally:
+            # Respect resource policy: if not keep_open and not use_own_browser, close after use
+            try:
+                if not settings.browser.keep_open and not settings.browser.use_own_browser:
+                    closed = True
+                    if context_instance:
+                        await context_instance.close()
+                    if browser_instance:
+                        await browser_instance.close()
+            except Exception:
+                pass
+
     # Internal helper used by run_research/run_task; no longer exposed as an MCP tool
     async def run_browser_agent(ctx: Context, task: str, *, kickstart: Optional[Dict[str, Any]] = None) -> str:
         logger.info(f"Received run_browser_agent task: {task[:100]}...")
@@ -656,6 +745,16 @@ def serve() -> FastMCP:
                 "- Finish with a FINAL SUMMARY containing: page title, 1–3 key points, relevant API signatures, and direct links (anchors) to sections.\n\n"
             )
             result = await run_browser_agent(ctx, f"{doc_prefix}{text}", kickstart={"kind": "search", "query": text})  # type: ignore
+
+        # Final safeguard: if still no result, run the controller-driven documentation pipeline
+        if result.strip().lower().startswith("agent finished without a final result"):
+            logger.info("Agent returned no final result after retry; running quick documentation pipeline.")
+            try:
+                fallback = await _documentation_quick_pipeline(text)
+                if fallback and isinstance(fallback, str) and fallback.strip():
+                    return fallback
+            except Exception as e:
+                logger.error(f"Documentation fallback failed: {e}")
 
         return result
 
