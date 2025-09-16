@@ -49,6 +49,8 @@ class CustomController(Controller):
         self.ask_assistant_callback = ask_assistant_callback
         self.mcp_client = None
         self.mcp_server_config = None
+        # Track if the user closed the browser window to stop iteration fast
+        self._user_closed_browser: bool = False
 
     async def _set_overlay(self, browser: BrowserContext, text: Optional[str]):
         """Inject or update a tiny overlay in the top-right corner of the active page."""
@@ -883,6 +885,56 @@ class CustomController(Controller):
         try:
             for action_name, params in action.model_dump(exclude_unset=True).items():
                 if params is not None:
+                    # Stop iterating if user closed the window (context or last page closed)
+                    try:
+                        # Attach close listeners once
+                        def _ensure_close_watchers(browser: Optional[BrowserContext]):
+                            try:
+                                if not browser:
+                                    return
+                                pw_ctx = getattr(browser, 'playwright_context', None)
+                                if not pw_ctx:
+                                    return
+                                if getattr(pw_ctx, '__bbmcp_close_watchers__', False):
+                                    return
+                                setattr(pw_ctx, '__bbmcp_close_watchers__', True)
+
+                                def _mark_closed(*_args, **_kwargs):
+                                    try:
+                                        self._user_closed_browser = True
+                                    except Exception:
+                                        pass
+
+                                try:
+                                    pw_ctx.on('close', _mark_closed)
+                                except Exception:
+                                    pass
+
+                                try:
+                                    for p in getattr(pw_ctx, 'pages', []) or []:
+                                        try:
+                                            p.on('close', _mark_closed)
+                                        except Exception:
+                                            continue
+                                except Exception:
+                                    pass
+
+                                try:
+                                    pw_ctx.on('page', lambda pg: pg.on('close', _mark_closed))
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+
+                        _ensure_close_watchers(browser_context)
+                        if self._user_closed_browser:
+                            raise asyncio.CancelledError('Browser window closed by user')
+                    except asyncio.CancelledError:
+                        # Bubble up to stop the run
+                        raise
+                    except Exception:
+                        # Ignore watcher setup errors
+                        pass
                     # Set a small overlay to indicate current activity
                     try:
                         label_map = {
@@ -929,8 +981,13 @@ class CustomController(Controller):
                         if not query:
                             logger.warning("search_google called without 'query'. Passing through.")
                         else:
+                            q = str(query)
+                            ql = q.lower()
+                            # Prefer official docs for Spigot/Bukkit queries to avoid unrelated results
+                            if any(t in ql for t in ("spigot", "bukkit", "papermc", "spigotmc")) and "site:" not in ql:
+                                q = f"{q} (site:hub.spigotmc.org OR site:javadoc.io)"
                             engine = get_search_engine()
-                            url = get_search_url(query)
+                            url = get_search_url(q)
                             logger.info(f"search_google -> engine='{engine}', navigating to: {url}")
                             new_tab = bool(_get_attr(params, "new_tab", False))
                             action_name = "go_to_url"
