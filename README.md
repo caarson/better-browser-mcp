@@ -24,7 +24,18 @@ $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "u
 & $uvx --from git+https://github.com/caarson/better-browser-mcp@main python -m playwright install
 ```
 
-2) Run the server:
+2) Run the server (choose one):
+
+Option A — Run from source (this repo; recommended to validate local changes like the overlay):
+
+```powershell
+$env:MCP_SERVER_LOGGING_LEVEL = "INFO"
+$env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"
+# Runs using the code in this workspace (no GitHub fetch)
+uv --directory . run mcp-server-browser-use
+```
+
+Option B — Run from GitHub (main branch):
 
 ```powershell
 $env:MCP_SERVER_LOGGING_LEVEL = "INFO"
@@ -32,6 +43,10 @@ $env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"
 $uvx = "$env:USERPROFILE\.local\bin\uvx.exe"; if (!(Test-Path $uvx)) { $uvx = "uvx" };
 & $uvx --from git+https://github.com/caarson/better-browser-mcp@main mcp-server-browser-use
 ```
+
+Notes:
+- The overlay badge appears during actions (navigating, searching, extracting). It won’t show while idle between steps.
+- If you prefer Python directly, you can also run: `uv --directory . run python -m mcp_server_browser_use`.
 
 3) Minimal MCP client config:
 

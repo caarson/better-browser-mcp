@@ -181,6 +181,35 @@ class CustomController(Controller):
         )
         async def doc_orient_and_extract(query: str, browser: BrowserContext, language: str | None = None, site: str | None = None, scroll_times: int = 3):
             try:
+                ql = (query or "").lower()
+                # Fast path for Spigot/Bukkit/Paper: open known official Javadocs index directly
+                if any(k in ql for k in ("spigot", "bukkit", "papermc")):
+                    try:
+                        await self._set_overlay(browser, "opening doc…")
+                        _ = await open_spigot_javadocs_index(browser=browser)
+                        try:
+                            await asyncio.sleep(0.3)
+                        except Exception:
+                            pass
+                        await self._set_overlay(browser, "scrolling…")
+                        _ = await self.registry.execute_action("scroll_down", {"times": int(scroll_times)}, browser=browser, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+                        await self._set_overlay(browser, "profiling…")
+                        prof = await identify_doc_profile(browser=browser)
+                        await self._set_overlay(browser, "reading content…")
+                        ext = await fetch_doc_sections_auto(browser=browser, max_items=200, include_html=False)
+                        payload = json.dumps({
+                            "query": query,
+                            "profile": (json.loads(prof.extracted_content) if isinstance(prof, ActionResult) and prof.extracted_content else {}),
+                            "extracted": (json.loads(ext.extracted_content) if isinstance(ext, ActionResult) and ext.extracted_content else {}),
+                        }, ensure_ascii=False)
+                        await self._set_overlay(browser, "")
+                        return ActionResult(extracted_content=payload, include_in_memory=True)
+                    except Exception:
+                        # Fall through to generic doc search path on failure
+                        try:
+                            await self._set_overlay(browser, "")
+                        except Exception:
+                            pass
                 await self._set_overlay(browser, "researching…")
                 # 1) Search
                 res1 = await doc_search(query=query, browser=browser, language=language, site=site, new_tab=False)
@@ -310,7 +339,60 @@ class CustomController(Controller):
                         return s
                     return 0
 
-                anchors = await page.query_selector_all('a[href]')
+                # Wait briefly for search results to render; prefer allowed-domain anchors
+                try:
+                    await page.wait_for_timeout(250)  # minimal delay to allow first paint
+                except Exception:
+                    pass
+
+                # Build an allowed-domain selector for fast-path matching on search engines
+                allowed_domain_list = [
+                    "docs.oracle.com",
+                    "javadoc.io",
+                    "hub.spigotmc.org",
+                    "developer.mozilla.org",
+                    "docs.python.org",
+                    "docs.rs",
+                    "doc.rust-lang.org",
+                    "pkg.go.dev",
+                    "nodejs.org",
+                    "learn.microsoft.com",
+                    "developer.apple.com",
+                    "kotlinlang.org",
+                    "readthedocs.io",
+                    "dev.java",
+                    "docs.gradle.org",
+                    "docs.spring.io",
+                ]
+                if allowed_sites:
+                    for s in allowed_sites:
+                        if s and isinstance(s, str):
+                            allowed_domain_list.append(s.strip().lower())
+
+                domain_css = ", ".join([f"a[href*='{d}']" for d in allowed_domain_list])
+                anchors = []
+                # Try a few short retries to catch dynamically loaded results (e.g., Brave search)
+                for _ in range(6):  # ~6 * 700ms ≈ 4.2s max
+                    try:
+                        if domain_css:
+                            # Prefer allowed-domain anchors if present
+                            dom_anchors = await page.query_selector_all(domain_css)
+                            if dom_anchors:
+                                anchors = dom_anchors
+                                break
+                    except Exception:
+                        pass
+                    try:
+                        gen = await page.query_selector_all('a[href]')
+                        if gen:
+                            anchors = gen
+                    except Exception:
+                        pass
+                    # If none yet, wait a bit and retry
+                    try:
+                        await page.wait_for_timeout(700)
+                    except Exception:
+                        pass
                 from urllib.parse import urlparse, parse_qs
                 candidates: list[tuple[int, str]] = []  # (score, url)
 
@@ -422,6 +504,26 @@ class CustomController(Controller):
                 available_file_paths=None,
                 context=None,
             )
+
+        @self.registry.action(
+            "Open Spigot Javadocs index (hub.spigotmc.org/javadocs/spigot) for official API docs."
+        )
+        async def open_spigot_javadocs_index(browser: BrowserContext, new_tab: bool = False):
+            try:
+                url = "https://hub.spigotmc.org/javadocs/spigot/"
+                logger.info(f"open_spigot_javadocs_index -> {url}")
+                await self._set_overlay(browser, "opening doc…")
+                return await self.registry.execute_action(
+                    "go_to_url",
+                    {"url": url, "new_tab": bool(new_tab)},
+                    browser=browser,
+                    page_extraction_llm=None,
+                    sensitive_data=None,
+                    available_file_paths=None,
+                    context=None,
+                )
+            except Exception as e:
+                return ActionResult(error=f"open_spigot_javadocs_index failed: {e}")
 
         @self.registry.action(
             "Extract main readable content from the current page (readability-like)."

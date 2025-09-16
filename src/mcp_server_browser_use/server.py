@@ -194,7 +194,7 @@ def serve() -> FastMCP:
     server = FastMCP("mcp_server_browser_use")
 
     async def _documentation_quick_pipeline(query: str) -> str:
-        """Open search → click best doc → scroll → extract → summarize via LLM. Returns a short report string."""
+        """Run the controller's doc pipeline (doc_orient_and_extract) and summarize the result. Returns a short report string."""
         browser_instance: Optional[CustomBrowser] = None
         context_instance: Optional[CustomBrowserContext] = None
         controller_instance: Optional[CustomController] = None
@@ -206,44 +206,35 @@ def serve() -> FastMCP:
             if not context_instance or not controller_instance:
                 return "Error: could not acquire browser/controller for documentation pipeline."
 
-            # 1) Navigate to search results
-            url = get_search_url(query)
+            # 1) Use the high-level doc action to search, click, scroll, detect profile, and extract sections (includes overlay updates)
+            extracted_json: Optional[str] = None
             try:
-                await controller_instance.registry.execute_action(
-                    "go_to_url",
-                    {"url": url, "new_tab": False},
+                ql = (query or "").lower()
+                lang = "java" if any(k in ql for k in ["spigot", "bukkit", "javadoc", "papermc"]) else None
+                res = await controller_instance.registry.execute_action(
+                    "doc_orient_and_extract",
+                    {"query": query, "language": lang, "scroll_times": 3},
                     browser=context_instance,
                     page_extraction_llm=None,
                     sensitive_data=None,
                     available_file_paths=None,
                     context=None,
                 )
-            except Exception as e:
-                logger.warning(f"Quick doc pipeline: navigation failed: {e}")
-
-            # 2) Try clicking a good doc link
-            try:
-                _ = await controller_instance.registry.execute_action("click_best_doc_result", {}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
-            except Exception:
-                pass
-
-            # 3) Scroll a bit to reveal content
-            try:
-                _ = await controller_instance.registry.execute_action("scroll_down", {"times": 3}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
-            except Exception:
-                pass
-
-            # 4) Extract sections
-            extracted_json: Optional[str] = None
-            try:
-                res = await controller_instance.registry.execute_action("fetch_doc_sections_auto", {"max_items": 200, "include_html": False}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
                 if hasattr(res, "extracted_content") and res.extracted_content:
                     extracted_json = str(res.extracted_content)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Quick doc pipeline: doc_orient_and_extract failed: {e}")
+            # 2) Fallback to main content if structured extraction failed
             if not extracted_json:
                 try:
-                    res2 = await controller_instance.registry.execute_action("extract_main_content", {}, browser=context_instance, page_extraction_llm=None, sensitive_data=None, available_file_paths=None, context=None)
+                    res2 = await controller_instance.registry.execute_action(
+                        "extract_main_content", {},
+                        browser=context_instance,
+                        page_extraction_llm=None,
+                        sensitive_data=None,
+                        available_file_paths=None,
+                        context=None,
+                    )
                     if hasattr(res2, "extracted_content") and res2.extracted_content:
                         extracted_json = str(res2.extracted_content)
                 except Exception:
