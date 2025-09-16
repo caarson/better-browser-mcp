@@ -47,6 +47,7 @@ from ._internal.browser.custom_context import (
     CustomBrowserContextConfig,
 )
 from ._internal.controller.custom_controller import CustomController
+from ._internal.utils.search_engine import get_search_url
 from ._internal.utils import llm_provider as internal_llm_provider # aliased
 
 from browser_use.agent.views import (
@@ -193,7 +194,7 @@ def serve() -> FastMCP:
     server = FastMCP("mcp_server_browser_use")
 
     # Internal helper used by run_research/run_task; no longer exposed as an MCP tool
-    async def run_browser_agent(ctx: Context, task: str) -> str:
+    async def run_browser_agent(ctx: Context, task: str, *, kickstart: Optional[Dict[str, Any]] = None) -> str:
         logger.info(f"Received run_browser_agent task: {task[:100]}...")
         # Browsing rules: prefer lightweight completion and handle search engine auto-corrections
         search_rules = (
@@ -241,6 +242,27 @@ def serve() -> FastMCP:
                 task_specific_history_dir.mkdir(parents=True, exist_ok=True)
                 agent_history_json_file = str(task_specific_history_dir / f"{agent_task_id}.json")
                 logger.info(f"Agent history will be saved to: {agent_history_json_file}")
+
+            # Optional pre-navigation to ensure a page opens (e.g., search results)
+            try:
+                if kickstart and context_instance and controller_instance:
+                    ks_kind = str(kickstart.get("kind", "")).lower()
+                    ks_query = str(kickstart.get("query", ""))
+                    if ks_kind in {"search", "doc", "doc_orient"} and ks_query:
+                        url = get_search_url(ks_query)
+                        logger.info(f"Kickstart navigation to search results: {url}")
+                        # Use controller registry to navigate so URL rewriting hooks apply
+                        await controller_instance.registry.execute_action(
+                            "go_to_url",
+                            {"url": url, "new_tab": False},
+                            browser=context_instance,
+                            page_extraction_llm=None,
+                            sensitive_data=None,
+                            available_file_paths=None,
+                            context=None,
+                        )
+            except Exception as e:
+                logger.warning(f"Kickstart navigation failed (continuing without): {e}")
 
             agent_instance = BrowserUseAgent(
                 task=task,
@@ -509,7 +531,7 @@ def serve() -> FastMCP:
         """
         env_mode = os.getenv("MCP_RESEARCH_MODE", "auto").lower()
         # If caller explicitly picks a mode, honor it; if left at default 'auto', allow env to set default mode
-        effective_mode = env_mode if mode == "auto" and env_mode in {"auto", "task", "research", "deep_research"} else mode
+        effective_mode = env_mode if mode == "auto" and env_mode in {"auto", "task", "research", "documentation", "deep_research"} else mode
         text = topic_or_task or ""
 
         logger.info(f"run_research received (mode={effective_mode}): {text[:120]}...")
@@ -551,6 +573,8 @@ def serve() -> FastMCP:
                 "class ", "method ", "package ", "interface ", "mdn", "python docs", "pypi docs",
                 "read the docs", "rtd", "godoc", "pkg.go.dev", "rust docs", "docs.rs", "nuget docs",
                 "dotnet api", "typescript api", "js api", "kotlin docs", "swift docs", "objc docs",
+                # Heuristics: general documentation intents and Java ecosystem keywords
+                "documentation", "docs", "api docs", "spigot", "bukkit", "papermc",
             ]
             return any(p in s for p in doc_markers)
 
@@ -600,10 +624,40 @@ def serve() -> FastMCP:
         else:  # research
             prefix = (
                 "Mode: RESEARCH. Find information, read carefully, and summarize the key findings with links to sources. "
-                "Prefer minimal tabs; do not change account settings or perform account logins.\n\n"
+                "Prefer minimal tabs; do not change account settings or perform account logins.\n"
+                "- You must browse the web for this task. FIRST ACTION: call search_google with the EXACT topic_or_task and open the results page.\n"
+                "- After landing on results, open the most relevant official documentation or authoritative source and extract key points before summarizing.\n\n"
             )
 
-        return await run_browser_agent(ctx, f"{prefix}{text}")  # type: ignore
+        # Execute the lightweight agent once; if it ends without a final result, retry in documentation mode
+        kickstart: Optional[Dict[str, Any]] = None
+        if chosen_mode in {"research", "documentation"}:
+            # Proactively open a search results page for the given query to avoid "no activity" cases
+            kickstart = {"kind": "search", "query": text}
+        result = await run_browser_agent(ctx, f"{prefix}{text}", kickstart=kickstart)  # type: ignore
+
+        if (
+            result.strip().lower().startswith("agent finished without a final result")
+            and chosen_mode in {"research", "task"}
+        ):
+            logger.info("Lightweight run yielded no final result; retrying in documentation mode for better coverage.")
+            doc_prefix = (
+                "Mode: DOCUMENTATION. Begin with a brief plan: identify target tech (library/runtime), scope (API/class/package), and 2–3 concise queries. "
+                "Prefer official documentation and API references; keep requests efficient and tabs minimal.\n"
+                "- First action: call doc_orient_and_extract with the EXACT topic_or_task. If it mentions Java/Javadoc/Spigot/Bukkit/Paper, pass language='java'.\n"
+                "- Prefer: oracle.com docs, javadoc.io, developer.oracle.com, developer.mozilla.org, docs.python.org, docs.rs.\n"
+                "- Doc-site detection heuristics: look for 'Packages/Classes/Index' (Java), API signature blocks, breadcrumbs, and the domains above.\n"
+                "- If Java-related (mentions class/package/interface or 'javadoc'): try javadoc.io search or the Oracle Java SE API index; otherwise run a targeted doc search.\n"
+                "- Use doc actions when appropriate: doc_search, doc_orient_and_extract, click_best_doc_result, open_java_api_index, open_javadoc_io_search, identify_doc_profile, fetch_doc_sections_auto, extract_main_content, fetch_java_doc_sections, scroll_down, collect_doc_overview, open_anchor_by_text.\n"
+                "- On search result pages that say 'Showing results for' and offer 'Search instead for <literal>', click the exact-match link.\n"
+                "- Keep a single window; open at most one extra tab for search when needed, then return to the main doc tab. Avoid logins or account changes.\n"
+                "- After landing on a doc page: scroll 2–3 times (scroll_down) to reveal content; then run identify_doc_profile. If profile=java_docs, use fetch_java_doc_sections; otherwise use fetch_doc_sections_auto and/or extract_main_content.\n"
+                "  On Oracle Java API index pages, navigate via Packages/Classes links to the relevant class or method section before summarizing.\n"
+                "- Finish with a FINAL SUMMARY containing: page title, 1–3 key points, relevant API signatures, and direct links (anchors) to sections.\n\n"
+            )
+            result = await run_browser_agent(ctx, f"{doc_prefix}{text}", kickstart={"kind": "search", "query": text})  # type: ignore
+
+        return result
 
     @server.tool()
     async def run_auto(
