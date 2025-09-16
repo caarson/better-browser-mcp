@@ -54,6 +54,12 @@ One-liner (local run from this repo):
 $env:MCP_SERVER_LOGGING_LEVEL = "INFO"; $env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"; uv --directory . run mcp-server-browser-use
 ```
 
+One-liner with kickstart search enabled (auto-open SERP for the topic):
+
+```powershell
+$env:MCP_SERVER_LOGGING_LEVEL = "INFO"; $env:MCP_RESEARCH_TOOL_SAVE_DIR = "$PWD\research-out"; $env:MCP_KICKSTART_SEARCH = "true"; uv --directory . run mcp-server-browser-use
+```
+
 3) Minimal MCP client config:
 
 ```json
@@ -114,6 +120,7 @@ MCP_BROWSER_HEADLESS=true
 MCP_RESEARCH_TOOL_SAVE_DIR=./research-out
 MCP_SEARCH_ENGINE=bing
 MCP_SERVER_LOGGING_LEVEL=INFO
+MCP_KICKSTART_SEARCH=false
 ```
 
 ## Troubleshooting
@@ -221,6 +228,7 @@ Configure the server and CLI using environment variables. You can set these in y
 | **Search (MCP_*)**                  |                                                | Web search engine configuration for the built-in "search_google" action.                                   |                                   |
 |                                     | `MCP_SEARCH_ENGINE`                            | Which search engine to use when the agent triggers a search. Options: `bing`, `ddg`, `google`, `brave`, `custom`. | `bing`                            |
 |                                     | `MCP_BLOCK_GOOGLE`                             | If `true` and the engine is `google`, the search will automatically fall back to DuckDuckGo. Also rewrites Google search URLs before navigation. | `false`                           |
+|                                     | `MCP_KICKSTART_SEARCH`                         | If `true`, proactively opens a search results page for the provided topic to avoid idle starts. If `false`, the agent will formulate its own queries before searching. | `false`                           |
 
 **Supported LLM Providers (`MCP_LLM_PROVIDER`):**
 `openai`, `azure_openai`, `anthropic`, `google`, `mistral`, `ollama`, `deepseek`, `openrouter`, `alibaba`, `moonshot`, `unbound`

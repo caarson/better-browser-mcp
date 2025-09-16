@@ -987,28 +987,42 @@ class CustomController(Controller):
                                     return
                                 setattr(pw_ctx, '__bbmcp_close_watchers__', True)
 
-                                def _mark_closed(*_args, **_kwargs):
+                                async def _mark_closed_safe():
                                     try:
-                                        self._user_closed_browser = True
+                                        # Give Playwright a brief moment to update page list
+                                        await asyncio.sleep(0.05)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        pages = getattr(pw_ctx, 'pages', None) or []
+                                        # Only mark closed when there are no remaining pages
+                                        if not pages:
+                                            self._user_closed_browser = True
+                                    except Exception:
+                                        pass
+
+                                def _on_close_event(*_args, **_kwargs):
+                                    try:
+                                        asyncio.create_task(_mark_closed_safe())
                                     except Exception:
                                         pass
 
                                 try:
-                                    pw_ctx.on('close', _mark_closed)
+                                    pw_ctx.on('close', _on_close_event)
                                 except Exception:
                                     pass
 
                                 try:
                                     for p in getattr(pw_ctx, 'pages', []) or []:
                                         try:
-                                            p.on('close', _mark_closed)
+                                            p.on('close', _on_close_event)
                                         except Exception:
                                             continue
                                 except Exception:
                                     pass
 
                                 try:
-                                    pw_ctx.on('page', lambda pg: pg.on('close', _mark_closed))
+                                    pw_ctx.on('page', lambda pg: pg.on('close', _on_close_event))
                                 except Exception:
                                     pass
                             except Exception:
@@ -1016,7 +1030,20 @@ class CustomController(Controller):
 
                         _ensure_close_watchers(browser_context)
                         if self._user_closed_browser:
-                            raise asyncio.CancelledError('Browser window closed by user')
+                            # Double-check that context truly has no open pages before cancelling
+                            try:
+                                pw_ctx = getattr(browser_context, 'playwright_context', None)
+                                pages = getattr(pw_ctx, 'pages', None) or []
+                                if not pages:
+                                    raise asyncio.CancelledError('Browser window closed by user')
+                                else:
+                                    # Spurious page close (e.g., about:blank); reset flag and continue
+                                    self._user_closed_browser = False
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                # If uncertain, proceed instead of cancelling
+                                self._user_closed_browser = False
                     except asyncio.CancelledError:
                         # Bubble up to stop the run
                         raise

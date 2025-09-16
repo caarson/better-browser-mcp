@@ -711,9 +711,11 @@ def serve() -> FastMCP:
 
         # Execute the lightweight agent once; if it ends without a final result, retry in documentation mode
         kickstart: Optional[Dict[str, Any]] = None
-        if chosen_mode in {"research", "documentation"}:
-            # Proactively open a search results page for the given query to avoid "no activity" cases
-            kickstart = {"kind": "search", "query": text}
+        # Only auto-open a SERP when explicitly enabled; otherwise let the agent formulate the query
+        import os as _os
+        if _os.getenv("MCP_KICKSTART_SEARCH", "false").lower() in {"1", "true", "yes"}:
+            if chosen_mode in {"research", "documentation"}:
+                kickstart = {"kind": "search", "query": text}
         result = await run_browser_agent(ctx, f"{prefix}{text}", kickstart=kickstart)  # type: ignore
 
         if (
@@ -735,7 +737,14 @@ def serve() -> FastMCP:
                 "  On Oracle Java API index pages, navigate via Packages/Classes links to the relevant class or method section before summarizing.\n"
                 "- Finish with a FINAL SUMMARY containing: page title, 1–3 key points, relevant API signatures, and direct links (anchors) to sections.\n\n"
             )
-            result = await run_browser_agent(ctx, f"{doc_prefix}{text}", kickstart={"kind": "search", "query": text})  # type: ignore
+            _ks = None
+            try:
+                import os as __os
+                if __os.getenv("MCP_KICKSTART_SEARCH", "false").lower() in {"1", "true", "yes"}:
+                    _ks = {"kind": "search", "query": text}
+            except Exception:
+                _ks = None
+            result = await run_browser_agent(ctx, f"{doc_prefix}{text}", kickstart=_ks)  # type: ignore
 
         # Final safeguard: if still no result, run the controller-driven documentation pipeline
         if result.strip().lower().startswith("agent finished without a final result"):
